@@ -82,10 +82,26 @@ The plugin includes an AI-powered summary feature that can generate intelligent 
 Access plugin settings from the Obsidian settings panel under "Graph Analysis":
 
 - **Exclude Folders**: Comma-separated list of folders to exclude from analysis
+  - Use folder paths like "Archive", "Templates", "Private/Personal"
+  - Supports nested folders and partial path matching
 - **Exclude Tags**: Comma-separated list of tags to exclude from analysis
+  - Use tag names without # like "private", "draft", "archive"
+  - Supports both frontmatter tags and inline tags
+  - Case-insensitive matching
 - **Result Limit**: Maximum number of results to display
 - **Gemini API Key**: Your Google Gemini API key for AI-powered summaries
+- **Exclusion Statistics**: Real-time view of how many files are excluded and included
 - **Visualization Options**: Customize the graph view appearance
+
+#### Exclusion Features
+
+The plugin provides robust exclusion capabilities:
+
+- **Folder Exclusion**: Exclude entire folders and their subfolders from analysis
+- **Tag Exclusion**: Exclude files based on tags (both frontmatter and inline tags)
+- **Real-time Statistics**: See how many files are excluded vs included
+- **Exclusion Preview**: View list of excluded files to verify your settings
+- **Automatic Updates**: Graph refreshes automatically when exclusion settings change
 
 ## Technical Details
 

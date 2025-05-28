@@ -5,6 +5,7 @@ import { GraphAnalysisView, GRAPH_ANALYSIS_VIEW_TYPE } from './views/GraphAnalys
 import { CentralityResultsView, CENTRALITY_RESULTS_VIEW_TYPE } from './views/CentralityResultsView';
 import { GraphAnalysisSettingTab } from './settings/GraphAnalysisSettingTab';
 import { AISummaryManager } from './ai/AISummaryManager';
+import { ExclusionUtils } from './utils/ExclusionUtils';
 
 // Import our styles 
 import './styles.css';
@@ -26,6 +27,7 @@ export default class GraphAnalysisPlugin extends Plugin {
     graphView: GraphView | null = null;
     centralityView: CentralityResultsView | null = null;
     aiSummaryManager: AISummaryManager | null = null;
+    exclusionUtils: ExclusionUtils | null = null;
     
     private fileCreatedHandler: ((file: TFile) => void) | null = null;
     private fileDeletedHandler: ((file: TFile) => void) | null = null;
@@ -44,6 +46,9 @@ export default class GraphAnalysisPlugin extends Plugin {
 
     async onload() {
         await this.loadSettings();
+
+        // Initialize exclusion utils
+        this.exclusionUtils = new ExclusionUtils(this.app, this.settings);
 
         // Initialize WASM module with improved async handling
         this.initializeWasmModule();
@@ -100,6 +105,13 @@ export default class GraphAnalysisPlugin extends Plugin {
         // Add settings tab
         this.addSettingTab(new GraphAnalysisSettingTab(this.app, this));
 
+        // Add command to show exclusion statistics
+        this.addCommand({
+            id: 'show-exclusion-stats',
+            name: 'Show Exclusion Statistics',
+            callback: () => this.showExclusionStats()
+        });
+
         // Initialize AI Summary Manager and add status bar button
         this.aiSummaryManager = new AISummaryManager(this.app, this.settings);
         this.aiSummaryManager.createStatusBarButton(this.addStatusBarItem());
@@ -149,6 +161,10 @@ export default class GraphAnalysisPlugin extends Plugin {
         // Update AI Summary Manager settings
         if (this.aiSummaryManager) {
             this.aiSummaryManager.updateSettings(this.settings);
+        }
+        // Update exclusion utils settings
+        if (this.exclusionUtils) {
+            this.exclusionUtils.updateSettings(this.settings);
         }
     }
 
@@ -624,26 +640,11 @@ export default class GraphAnalysisPlugin extends Plugin {
     }
     
     isFileExcluded(file: TFile): boolean {
-        for (const folder of this.settings.excludeFolders) {
-            if (folder && file.path.startsWith(folder)) {
-                return true;
-            }
+        if (!this.exclusionUtils) {
+            // Fallback to basic exclusion logic if exclusionUtils is not initialized
+            return false;
         }
-        
-        const fileCache = this.app.metadataCache.getFileCache(file);
-        if (fileCache && fileCache.frontmatter && fileCache.frontmatter.tags) {
-            const fileTags = Array.isArray(fileCache.frontmatter.tags) 
-                ? fileCache.frontmatter.tags 
-                : [fileCache.frontmatter.tags];
-                
-            for (const tag of this.settings.excludeTags) {
-                if (tag && fileTags.includes(tag)) {
-                    return true;
-                }
-            }
-        }
-        
-        return false;
+        return this.exclusionUtils.isFileExcluded(file);
     }
     
     displayResults(results: Node[], algorithmName: string) {
@@ -653,6 +654,38 @@ export default class GraphAnalysisPlugin extends Plugin {
         this.activateCentralityView(limitedResults, algorithmName);
         
         console.log(`Graph Analysis Results (${algorithmName}):`, results);
+    }
+
+    showExclusionStats() {
+        if (!this.exclusionUtils) {
+            new Notice('Exclusion utils not initialized');
+            return;
+        }
+
+        try {
+            const stats = this.exclusionUtils.getExclusionStats();
+            const excludedFiles = this.exclusionUtils.getExcludedFiles();
+            
+            let message = `Exclusion Statistics:\n`;
+            message += `Total files: ${stats.totalFiles}\n`;
+            message += `Excluded by folder: ${stats.excludedByFolder}\n`;
+            message += `Excluded by tag: ${stats.excludedByTag}\n`;
+            message += `Total excluded: ${stats.totalExcluded}\n`;
+            message += `Included in analysis: ${stats.includedFiles}`;
+            
+            if (excludedFiles.length > 0) {
+                message += `\n\nExcluded files:\n${excludedFiles.slice(0, 10).join('\n')}`;
+                if (excludedFiles.length > 10) {
+                    message += `\n... and ${excludedFiles.length - 10} more`;
+                }
+            }
+            
+            console.log(message);
+            new Notice(`Check console for detailed exclusion statistics. ${stats.totalExcluded} files excluded.`);
+        } catch (error) {
+            console.error('Error getting exclusion statistics:', error);
+            new Notice('Error getting exclusion statistics');
+        }
     }
 
     private async activateCentralityView(results: Node[], algorithmName: string) {

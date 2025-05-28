@@ -204,7 +204,7 @@ ${content}`;
             const displayFormat = `${summaryText}
 
 *Original word count: ${wordCount} words*
-*Generated using Google Gemini AI*`;
+*Generated using Google Gemini 1.5 Flash*`;
 
             // Format for writing to note (callout format without word count)
             const writeFormat = `> [!summary] AI Summary

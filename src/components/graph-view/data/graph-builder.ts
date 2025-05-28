@@ -41,7 +41,12 @@ export class GraphDataBuilder {
     }
 
     public async buildGraphData(): Promise<{ graphData: GraphData, degreeCentrality: Node[], metadata: GraphMetadata }> {
-        const files = this.getAllMarkdownFiles();
+        const allFiles = this.getAllMarkdownFiles();
+        const plugin = this.pluginService.getPlugin();
+        
+        // Filter files using exclusion logic
+        const files = allFiles.filter(file => !plugin.isFileExcluded(file));
+        
         const nodes: string[] = [];
         const edges = new Set<string>();
         const pathToIndex = new Map<string, number>();
