@@ -1,6 +1,12 @@
 import { App, Notice, Modal, requestUrl, TFile, Menu, setIcon } from 'obsidian';
 import { GraphAnalysisSettings } from '../types/types';
 
+export interface TokenUsage {
+    promptTokens: number;
+    candidatesTokens: number;
+    totalTokens: number;
+}
+
 export interface VaultAnalysisResult {
     id: string;
     title: string;
@@ -13,6 +19,14 @@ export interface VaultAnalysisResult {
     wordCount: number;
 }
 
+export interface VaultAnalysisData {
+    generatedAt: string;
+    totalFiles: number;
+    apiProvider: string;
+    tokenUsage: TokenUsage;
+    results: VaultAnalysisResult[];
+}
+
 export class VaultAnalysisManager {
     private app: App;
     private settings: GraphAnalysisSettings;
@@ -21,34 +35,6 @@ export class VaultAnalysisManager {
     constructor(app: App, settings: GraphAnalysisSettings) {
         this.app = app;
         this.settings = settings;
-    }
-
-    public createStatusBarButton(statusBarContainer: HTMLElement): HTMLElement {
-        // Create vault analysis button
-        this.statusBarItem = statusBarContainer.createEl('div', {
-            cls: 'status-bar-item plugin-graph-analysis-vault-analysis'
-        });
-
-        // Create icon container for vault analysis
-        const vaultIconContainer = this.statusBarItem.createEl('span', {
-            cls: 'status-bar-item-icon'
-        });
-
-        // Use brain icon for vault analysis
-        setIcon(vaultIconContainer, 'sun');
-
-        // Add text label for vault analysis
-        this.statusBarItem.createEl('span', {
-            text: 'Vault Analysis',
-            cls: 'status-bar-item-text'
-        });
-
-        // Add click handler for vault analysis
-        this.statusBarItem.addEventListener('click', (event) => {
-            this.showVaultAnalysisMenu(event);
-        });
-
-        return this.statusBarItem;
     }
 
     public createGraphViewButton(container: HTMLElement): HTMLElement {
@@ -136,6 +122,7 @@ export class VaultAnalysisManager {
             const results: VaultAnalysisResult[] = [];
             let processed = 0;
             let failed = 0;
+            let totalTokenUsage: TokenUsage = { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 };
 
             // Process files in batches to avoid rate limiting
             const batchSize = 10; // 10 files per batch
@@ -152,12 +139,19 @@ export class VaultAnalysisManager {
                 let apiResponseStatus: number | null = null;
                 let apiResponseReceived = false;
                 
-                // Update progress
-                progressNotice.setMessage(`Processing batch ${batchIndex + 1}/${totalBatches} (${batch.length} files)... (${processed}/${includedFiles.length} completed, ${failed} failed)`);
+                // Update progress with token usage
+                const tokenInfo = totalTokenUsage.totalTokens > 0 ? ` (${totalTokenUsage.totalTokens} tokens used)` : '';
+                progressNotice.setMessage(`Processing batch ${batchIndex + 1}/${totalBatches} (${batch.length} files)... (${processed}/${includedFiles.length} completed, ${failed} failed)${tokenInfo}`);
                 
                 try {
                     // Process entire batch in a single API request
-                    const batchResults = await this.analyzeBatch(batch);
+                    const batchResult = await this.analyzeBatch(batch);
+                    const batchResults = batchResult.results;
+                    
+                    // Accumulate token usage
+                    totalTokenUsage.promptTokens += batchResult.tokenUsage.promptTokens;
+                    totalTokenUsage.candidatesTokens += batchResult.tokenUsage.candidatesTokens;
+                    totalTokenUsage.totalTokens += batchResult.tokenUsage.totalTokens;
                     
                     // Set flag when API response is successful
                     apiResponseStatus = 200;
@@ -192,12 +186,19 @@ export class VaultAnalysisManager {
                     // Check if it's a rate limit error (429) and retry with longer delay
                     if (batchError instanceof Error && batchError.message.includes('429')) {
                         console.log(`Rate limit hit, retrying batch ${batchIndex + 1} after longer delay...`);
-                        progressNotice.setMessage(`Rate limit exceeded, waiting 10s before retry... (${processed}/${includedFiles.length} completed, ${failed} failed)`);
+                        const tokenInfo = totalTokenUsage.totalTokens > 0 ? ` (${totalTokenUsage.totalTokens} tokens used)` : '';
+                        progressNotice.setMessage(`Rate limit exceeded, waiting 10s before retry... (${processed}/${includedFiles.length} completed, ${failed} failed)${tokenInfo}`);
                         await new Promise(resolve => setTimeout(resolve, 10000)); // 10 second delay for rate limit retry
                         
                         // Retry the batch once
                         try {
-                            const retryResults = await this.analyzeBatch(batch);
+                            const retryResult = await this.analyzeBatch(batch);
+                            const retryResults = retryResult.results;
+                            
+                            // Accumulate token usage from retry
+                            totalTokenUsage.promptTokens += retryResult.tokenUsage.promptTokens;
+                            totalTokenUsage.candidatesTokens += retryResult.tokenUsage.candidatesTokens;
+                            totalTokenUsage.totalTokens += retryResult.tokenUsage.totalTokens;
                             
                             // Update flag after successful retry
                             apiResponseStatus = 200;
@@ -230,14 +231,15 @@ export class VaultAnalysisManager {
                     }
                 }
                 
-                // Rate limiting: always wait 5 seconds, then check API response flag
+                // Rate limiting: always wait between batches
                 if (batchIndex < totalBatches - 1) {
-                    progressNotice.setMessage(`Rate limiting: waiting 5s... (${processed}/${includedFiles.length} completed, ${failed} failed)`);
-                    await new Promise(resolve => setTimeout(resolve, 5000)); // Always wait 5 seconds
+                    // progressNotice.setMessage(`Rate limiting: waiting 5s... (${processed}/${includedFiles.length} completed, ${failed} failed)`);
+                    await new Promise(resolve => setTimeout(resolve, delayBetweenBatches)); // Always wait between batches
                     
-                    // After 5 seconds, check if we got a successful response
+                    // After delay, check if we got a successful response
                     if (apiResponseReceived && apiResponseStatus === 200) {
-                        progressNotice.setMessage(`API responded successfully, proceeding to next batch... (${processed}/${includedFiles.length} completed, ${failed} failed)`);
+                        const tokenInfo = totalTokenUsage.totalTokens > 0 ? ` (${totalTokenUsage.totalTokens} tokens used)` : '';
+                        progressNotice.setMessage(`API responded successfully, proceeding to next batch... (${processed}/${includedFiles.length} completed, ${failed} failed)${tokenInfo}`);
                     } else {
                         // Wait until we get a successful response or timeout
                         let waitTime = 0;
@@ -245,15 +247,17 @@ export class VaultAnalysisManager {
                         const checkInterval = 1000; // Check every 1 second
                         
                         while (waitTime < maxWaitTime && (!apiResponseReceived || apiResponseStatus !== 200)) {
-                            progressNotice.setMessage(`Waiting for successful API response... ${Math.ceil((maxWaitTime - waitTime)/1000)}s remaining (${processed}/${includedFiles.length} completed, ${failed} failed)`);
+                            const tokenInfo = totalTokenUsage.totalTokens > 0 ? ` (${totalTokenUsage.totalTokens} tokens used)` : '';
+                            progressNotice.setMessage(`Waiting for successful API response... ${Math.ceil((maxWaitTime - waitTime)/1000)}s remaining (${processed}/${includedFiles.length} completed, ${failed} failed)${tokenInfo}`);
                             await new Promise(resolve => setTimeout(resolve, checkInterval));
                             waitTime += checkInterval;
                         }
                         
+                        const tokenInfo = totalTokenUsage.totalTokens > 0 ? ` (${totalTokenUsage.totalTokens} tokens used)` : '';
                         if (apiResponseStatus === 200) {
-                            progressNotice.setMessage(`API response successful after additional wait, proceeding... (${processed}/${includedFiles.length} completed, ${failed} failed)`);
+                            progressNotice.setMessage(`API response successful after additional wait, proceeding... (${processed}/${includedFiles.length} completed, ${failed} failed)${tokenInfo}`);
                         } else {
-                            progressNotice.setMessage(`Proceeding despite API issues (status: ${apiResponseStatus})... (${processed}/${includedFiles.length} completed, ${failed} failed)`);
+                            progressNotice.setMessage(`Proceeding despite API issues (status: ${apiResponseStatus})... (${processed}/${includedFiles.length} completed, ${failed} failed)${tokenInfo}`);
                         }
                     }
                 }
@@ -262,14 +266,14 @@ export class VaultAnalysisManager {
             // Hide progress notice
             progressNotice.hide();
 
-            // Save results to JSON file
-            await this.saveAnalysisResults(results);
+            // Save results to JSON file with token usage
+            await this.saveAnalysisResults(results, totalTokenUsage);
             
-            // Show completion notice with detailed stats
+            // Show completion notice with detailed stats including token usage
             if (failed === 0) {
-                new Notice(`✅ Vault analysis completed successfully! Processed ${processed} files. Results saved to plugin data folder`);
+                new Notice(`✅ Vault analysis completed successfully! Processed ${processed} files using ${totalTokenUsage.totalTokens} tokens. Results saved to plugin data folder`);
             } else {
-                new Notice(`⚠️ Vault analysis completed with some issues. Processed ${processed - failed} files successfully, ${failed} failed. Results saved to plugin data folder`);
+                new Notice(`⚠️ Vault analysis completed with some issues. Processed ${processed - failed} files successfully, ${failed} failed, using ${totalTokenUsage.totalTokens} tokens. Results saved to plugin data folder`);
             }
             
         } catch (error) {
@@ -278,44 +282,10 @@ export class VaultAnalysisManager {
         }
     }
 
-    private async analyzeFile(file: TFile): Promise<VaultAnalysisResult | null> {
-        try {
-            // Get file content and metadata
-            const content = await this.app.vault.read(file);
-            const cleanedContent = this.cleanupContent(content);
-            const wordCount = cleanedContent.split(/\s+/).filter(word => word.length > 0).length;
-            
-            // Skip files that are too short to be meaningful
-            if (wordCount < 10) {
-                return null;
-            }
-
-            // Get file stats
-            const stat = await this.app.vault.adapter.stat(file.path);
-            const created = stat?.ctime ? new Date(stat.ctime).toISOString() : '';
-            const modified = stat?.mtime ? new Date(stat.mtime).toISOString() : '';
-
-            // Generate AI analysis
-            const aiAnalysis = await this.generateFileAnalysis(cleanedContent, file.basename);
-            
-            return {
-                id: this.generateFileId(file),
-                title: file.basename,
-                summary: aiAnalysis.summary,
-                keywords: aiAnalysis.keywords,
-                knowledgeDomain: aiAnalysis.knowledgeDomain,
-                created,
-                modified,
-                path: file.path,
-                wordCount
-            };
-        } catch (error) {
-            console.error(`Error analyzing file ${file.path}:`, error);
-            throw error;
-        }
-    }
-
-    private async analyzeBatch(files: TFile[]): Promise<Array<{ success: boolean; data?: VaultAnalysisResult; error?: string }>> {
+    private async analyzeBatch(files: TFile[]): Promise<{
+        results: Array<{ success: boolean; data?: VaultAnalysisResult; error?: string }>;
+        tokenUsage: TokenUsage;
+    }> {
         try {
             // Prepare file data for batch processing
             const fileData: Array<{
@@ -364,6 +334,7 @@ export class VaultAnalysisManager {
             const apiFiles = fileData.filter(data => !data.isShort);
             
             const results: Array<{ success: boolean; data?: VaultAnalysisResult; error?: string }> = [];
+            let totalTokenUsage: TokenUsage = { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 };
             
             // Handle short files locally without API call
             shortFiles.forEach(data => {
@@ -386,12 +357,17 @@ export class VaultAnalysisManager {
             // Process API files if any exist
             if (apiFiles.length > 0) {
                 try {
-                    const batchAnalysis = await this.generateBatchAnalysis(apiFiles);
+                    const batchAnalysisResult = await this.generateBatchAnalysis(apiFiles);
+                    
+                    // Accumulate token usage
+                    totalTokenUsage.promptTokens += batchAnalysisResult.tokenUsage.promptTokens;
+                    totalTokenUsage.candidatesTokens += batchAnalysisResult.tokenUsage.candidatesTokens;
+                    totalTokenUsage.totalTokens += batchAnalysisResult.tokenUsage.totalTokens;
                     
                     // Process API results
                     for (let i = 0; i < apiFiles.length; i++) {
                         const data = apiFiles[i];
-                        const analysis = batchAnalysis[i];
+                        const analysis = batchAnalysisResult.results[i];
                         
                         if (analysis && analysis.summary) {
                             results.push({
@@ -440,11 +416,14 @@ export class VaultAnalysisManager {
                 }
             }
             
-            return sortedResults;
+            return { results: sortedResults, tokenUsage: totalTokenUsage };
         } catch (error) {
             console.error('Error in batch analysis:', error);
             // Return error for all files in batch
-            return files.map(() => ({ success: false, error: (error as Error).message }));
+            return {
+                results: files.map(() => ({ success: false, error: (error as Error).message })),
+                tokenUsage: { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 }
+            };
         }
     }
 
@@ -491,118 +470,17 @@ export class VaultAnalysisManager {
         return cleaned;
     }
 
-    private async generateFileAnalysis(content: string, fileName: string): Promise<{
-        summary: string;
-        keywords: string;
-        knowledgeDomain: string;
-    }> {
-        const apiKey = this.settings.geminiApiKey;
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
-
-        const prompt = `Analyze the following note titled "${fileName}" and provide:
-1. A one-sentence summary of the main concept or purpose
-2. 3-6 key terms or phrases (comma-separated)
-3. 2-4 knowledge domains or fields this content belongs to (comma-separated)
-
-Format your response as JSON:
-{
-  "summary": "One sentence summary",
-  "keywords": "keyword1, keyword2, keyword3",
-  "knowledgeDomain": "domain1, domain2, domain3"
-}
-
-Content:
-${content}`;
-
-        const requestBody = { 
-            contents: [{
-                parts: [{
-                    text: prompt
-                }]
-            }],
-            generationConfig: {
-                temperature: 0.2,
-                topK: 20,
-                topP: 0.8,
-                maxOutputTokens: 200,
-            }
-        };
-
-        try {
-            const response = await requestUrl({
-                url: url,
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(requestBody)
-            });
-
-            if (response.status !== 200) {
-                throw new Error(`Gemini API returned status ${response.status}: ${response.text}`);
-            }
-
-            const data = response.json;
-            
-            if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
-                throw new Error('Invalid response format from Gemini API');
-            }
-
-            const responseText = data.candidates[0].content.parts[0].text;
-            
-            // Try to parse as JSON, fallback to text parsing if needed
-            try {
-                const jsonResponse = JSON.parse(responseText);
-                return {
-                    summary: jsonResponse.summary || '',
-                    keywords: jsonResponse.keywords || '',
-                    knowledgeDomain: jsonResponse.knowledgeDomain || ''
-                };
-            } catch (parseError) {
-                // Fallback: extract from text response
-                return this.parseTextResponse(responseText);
-            }
-        } catch (error) {
-            console.error('Gemini API error:', error);
-            throw error;
-        }
-    }
-
-    private parseTextResponse(text: string): {
-        summary: string;
-        keywords: string;
-        knowledgeDomain: string;
-    } {
-        // Fallback parsing for non-JSON responses
-        const lines = text.split('\n').map(line => line.trim()).filter(line => line);
-        
-        let summary = '';
-        let keywords = '';
-        let knowledgeDomain = '';
-        
-        for (const line of lines) {
-            if (line.toLowerCase().includes('summary')) {
-                summary = line.replace(/.*?summary[^:]*:\s*/i, '');
-            } else if (line.toLowerCase().includes('keyword')) {
-                keywords = line.replace(/.*?keyword[^:]*:\s*/i, '');
-            } else if (line.toLowerCase().includes('domain')) {
-                knowledgeDomain = line.replace(/.*?domain[^:]*:\s*/i, '');
-            }
-        }
-        
-        return { summary, keywords, knowledgeDomain };
-    }
-
     private async ensureVaultAnalysisFileExists(): Promise<void> {
         const filePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/vault-analysis.json`;
         try {
             await this.app.vault.adapter.read(filePath);
         } catch {
             // File doesn't exist, create it with empty structure
-            const initialData = {
+            const initialData: VaultAnalysisData = {
                 generatedAt: new Date().toISOString(),
                 totalFiles: 0,
                 apiProvider: 'Google Gemini',
+                tokenUsage: { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 },
                 results: []
             };
             // Ensure the plugin directory exists
@@ -690,7 +568,7 @@ ${content}`;
         }
     }
 
-    private async saveAnalysisResults(results: VaultAnalysisResult[]): Promise<void> {
+    private async saveAnalysisResults(results: VaultAnalysisResult[], totalTokenUsage: TokenUsage): Promise<void> {
         try {
             // Ensure the file exists
             await this.ensureVaultAnalysisFileExists();
@@ -699,10 +577,11 @@ ${content}`;
             const sortedResults = results.sort((a, b) => a.title.localeCompare(b.title));
             
             // Create the output data with metadata
-            const outputData = {
+            const outputData: VaultAnalysisData = {
                 generatedAt: new Date().toISOString(),
                 totalFiles: sortedResults.length,
                 apiProvider: 'Google Gemini',
+                tokenUsage: totalTokenUsage,
                 results: sortedResults
             };
             
@@ -726,11 +605,14 @@ ${content}`;
         created: string;
         modified: string;
         isShort: boolean;
-    }>): Promise<Array<{
-        summary: string;
-        keywords: string;
-        knowledgeDomain: string;
-    }>> {
+    }>): Promise<{
+        results: Array<{
+            summary: string;
+            keywords: string;
+            knowledgeDomain: string;
+        }>;
+        tokenUsage: TokenUsage;
+    }> {
         const apiKey = this.settings.geminiApiKey;
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
 
@@ -738,7 +620,10 @@ ${content}`;
         const meaningfulFiles = fileData.filter(data => !data.isShort && data.content.trim().length > 0);
         
         if (meaningfulFiles.length === 0) {
-            return [];
+            return {
+                results: [],
+                tokenUsage: { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 }
+            };
         }
 
         // Build the batch prompt
@@ -800,6 +685,13 @@ Notes to analyze:
                 throw new Error('Invalid response format from Gemini API');
             }
 
+            // Extract token usage from the response
+            const tokenUsage: TokenUsage = {
+                promptTokens: data.usageMetadata?.promptTokenCount || 0,
+                candidatesTokens: data.usageMetadata?.candidatesTokenCount || 0,
+                totalTokens: data.usageMetadata?.totalTokenCount || 0
+            };
+
             const responseText = data.candidates[0].content.parts[0].text;
             
             // Try to parse as JSON array
@@ -816,11 +708,14 @@ Notes to analyze:
                 
                 const jsonResponse = JSON.parse(cleanedResponse);
                 if (Array.isArray(jsonResponse) && jsonResponse.length === meaningfulFiles.length) {
-                    return jsonResponse.map(item => ({
-                        summary: item.summary || '',
-                        keywords: item.keywords || '',
-                        knowledgeDomain: item.knowledgeDomain || ''
-                    }));
+                    return {
+                        results: jsonResponse.map(item => ({
+                            summary: item.summary || '',
+                            keywords: item.keywords || '',
+                            knowledgeDomain: item.knowledgeDomain || ''
+                        })),
+                        tokenUsage
+                    };
                 } else {
                     console.error('Response array length mismatch. Expected:', meaningfulFiles.length, 'Got:', jsonResponse.length);
                     // If length mismatch, pad with empty results or truncate
@@ -840,17 +735,20 @@ Notes to analyze:
                             });
                         }
                     }
-                    return paddedResults;
+                    return { results: paddedResults, tokenUsage };
                 }
             } catch (parseError) {
                 console.error('Failed to parse batch response as JSON:', parseError);
                 console.error('Raw response:', responseText);
                 // Fallback: create default results for each file
-                return meaningfulFiles.map((data) => ({
-                    summary: `Analysis failed for ${data.file.basename}`,
-                    keywords: '',
-                    knowledgeDomain: ''
-                }));
+                return {
+                    results: meaningfulFiles.map((data) => ({
+                        summary: `Analysis failed for ${data.file.basename}`,
+                        keywords: '',
+                        knowledgeDomain: ''
+                    })),
+                    tokenUsage
+                };
             }
         } catch (error) {
             console.error('Gemini API error in batch analysis:', error);
@@ -860,14 +758,9 @@ Notes to analyze:
 }
 
 class VaultAnalysisModal extends Modal {
-    private analysisData: {
-        generatedAt: string;
-        totalFiles: number;
-        apiProvider: string;
-        results: VaultAnalysisResult[];
-    };
+    private analysisData: VaultAnalysisData;
 
-    constructor(app: App, analysisData: any) {
+    constructor(app: App, analysisData: VaultAnalysisData) {
         super(app);
         this.analysisData = analysisData;
     }
@@ -898,6 +791,13 @@ class VaultAnalysisModal extends Modal {
             text: `API Provider: ${this.analysisData.apiProvider}`
         });
         
+        // Token usage information
+        if (this.analysisData.tokenUsage && this.analysisData.tokenUsage.totalTokens > 0) {
+            summaryContainer.createEl('p', {
+                text: `Tokens used: ${this.analysisData.tokenUsage.totalTokens.toLocaleString()} (${this.analysisData.tokenUsage.promptTokens.toLocaleString()} input + ${this.analysisData.tokenUsage.candidatesTokens.toLocaleString()} output)`
+            });
+        }
+
         // Search functionality
         const searchContainer = contentEl.createEl('div', { 
             cls: 'vault-analysis-search' 
@@ -971,9 +871,17 @@ class VaultAnalysisModal extends Modal {
                     cls: 'result-word-count'
                 });
                 
+                // Display dates (created and modified) on the same line
+                const dateInfo = [];
+                if (result.created) {
+                    dateInfo.push(`Created: ${new Date(result.created).toLocaleDateString()}`);
+                }
                 if (result.modified) {
+                    dateInfo.push(`Modified: ${new Date(result.modified).toLocaleDateString()}`);
+                }
+                if (dateInfo.length > 0) {
                     metaContainer.createEl('span', {
-                        text: ` • Modified: ${new Date(result.modified).toLocaleDateString()}`,
+                        text: ` • ${dateInfo.join(' • ')}`,
                         cls: 'result-date'
                     });
                 }
