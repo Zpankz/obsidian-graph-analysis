@@ -12,11 +12,13 @@
  * 8. AI Summary Components
  * 9. Graph Analysis View Status Bar Control
  * 10. Vault Analysis Components
+ * 11. Calendar Chart Components
  *----------------------------------------*/
 
 /* 1. Variables & Imports
 /*----------------------------------------*/
 @import './styles/theme.css';
+@import './styles/calendar-chart.css';
 
 /* 2. Base Container Styles
 /*----------------------------------------*/
@@ -829,11 +831,24 @@
     margin-bottom: 16px;
 }
 
-.vault-analysis-main-title {
-    margin: 0;
+.vault-analysis-header-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.vault-analysis-main-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     color: var(--text-accent);
-    font-size: var(--font-ui-large);
-    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.vault-analysis-main-icon svg {
+    width: 32px;
+    height: 32px;
+    stroke-width: 1.5;
 }
 
 .vault-analysis-nav {
@@ -901,12 +916,35 @@
 .vault-analysis-content-container {
     flex: 1;
     overflow-y: auto;
-    max-height: calc(80vh - 140px);
+    overflow-x: hidden;
+    padding: 0 20px;
+    min-height: 0; /* Allow flex item to shrink */
+}
+
+/* Consistent section layout system - invisible styling for clean UI */
+.vault-analysis-section {
+    width: 100%;
+    margin-bottom: 24px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-sizing: border-box;
+}
+
+.vault-analysis-section:last-child {
+    margin-bottom: 0;
+}
+
+.vault-analysis-section-title {
+    margin: 0 0 16px 0;
+    color: var(--text-accent);
+    font-size: var(--font-ui-large);
+    font-weight: 600;
 }
 
 .vault-analysis-placeholder {
-    padding: 32px;
-    text-align: center;
+    padding: 16px 0;
+    text-align: left;
     color: var(--text-muted);
 }
 
@@ -940,10 +978,11 @@
 }
 
 .vault-analysis-summary {
-    margin-bottom: 16px;
+    margin: 0 0 16px 0;
     padding: 12px;
     background-color: var(--background-secondary);
     border-radius: 6px;
+    border: 1px solid var(--background-modifier-border);
 }
 
 .vault-analysis-summary p {
@@ -953,7 +992,8 @@
 }
 
 .vault-analysis-search {
-    margin-bottom: 16px;
+    margin: 0 0 16px 0;
+    padding: 0;
 }
 
 .vault-analysis-search-input {
@@ -964,6 +1004,7 @@
     background-color: var(--background-primary);
     color: var(--text-normal);
     font-size: var(--font-ui-medium);
+    box-sizing: border-box;
 }
 
 .vault-analysis-search-input:focus {
@@ -972,12 +1013,12 @@
     box-shadow: 0 0 0 2px var(--text-accent-hover);
 }
 
+/* Remove nested scrolling - let the main container handle all scrolling */
 .vault-analysis-results {
-    max-height: 400px;
-    overflow-y: auto;
     border: 1px solid var(--background-modifier-border);
     border-radius: 6px;
     background-color: var(--background-primary);
+    margin: 0;
 }
 
 .vault-analysis-result-item {

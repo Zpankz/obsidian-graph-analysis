@@ -1,4 +1,5 @@
 import { App, Modal, setIcon } from 'obsidian';
+import { KnowledgeCalendarChart } from '../components/calendar-chart/KnowledgeCalendarChart';
 
 // Import types from the main manager file
 export interface TokenUsage {
@@ -38,23 +39,31 @@ export class VaultAnalysisModal extends Modal {
     private contentContainer: HTMLElement;
     private hasExistingData: boolean;
     private vaultAnalysisManager: VaultAnalysisManager;
+    private settings: { excludeFolders: string[]; excludeTags: string[] };
 
-    constructor(app: App, analysisData: VaultAnalysisData | null, hasExistingData: boolean, vaultAnalysisManager: VaultAnalysisManager) {
+    constructor(app: App, analysisData: VaultAnalysisData | null, hasExistingData: boolean, vaultAnalysisManager: VaultAnalysisManager, settings: { excludeFolders: string[]; excludeTags: string[] } = { excludeFolders: [], excludeTags: [] }) {
         super(app);
         this.analysisData = analysisData;
         this.hasExistingData = hasExistingData;
         this.vaultAnalysisManager = vaultAnalysisManager;
+        this.settings = settings;
     }
 
     onOpen() {
         const { contentEl, modalEl } = this;
         contentEl.empty();
         
-        // Set landscape layout dimensions
+        // Set landscape layout dimensions - remove fixed height to prevent modal scrolling
         modalEl.style.width = '90vw';
-        modalEl.style.height = '80vh';
+        modalEl.style.height = 'auto';
         modalEl.style.maxWidth = '900px';
-        modalEl.style.maxHeight = '800px';
+        modalEl.style.maxHeight = '90vh';
+        
+        // Ensure modal content doesn't scroll
+        contentEl.style.overflow = 'hidden';
+        contentEl.style.display = 'flex';
+        contentEl.style.flexDirection = 'column';
+        contentEl.style.height = '100%';
         
         // Create header with navigation
         this.createHeader(contentEl);
@@ -73,14 +82,19 @@ export class VaultAnalysisModal extends Modal {
             cls: 'vault-analysis-header' 
         });
         
-        // Title
-        headerContainer.createEl('h2', { 
-            text: 'Vault Analysis',
-            cls: 'vault-analysis-main-title'
+        // Main header row with icon and navigation
+        const headerRow = headerContainer.createEl('div', { 
+            cls: 'vault-analysis-header-row' 
         });
         
+        // Title icon (same as ribbon)
+        const titleIcon = headerRow.createEl('div', { 
+            cls: 'vault-analysis-main-icon'
+        });
+        setIcon(titleIcon, 'sun');
+        
         // Navigation tabs
-        const navContainer = headerContainer.createEl('div', { 
+        const navContainer = headerRow.createEl('div', { 
             cls: 'vault-analysis-nav' 
         });
         
@@ -102,13 +116,13 @@ export class VaultAnalysisModal extends Modal {
             setIcon(icon, tab.icon);
             tabButton.prepend(icon);
             
-            tabButton.addEventListener('click', () => {
-                this.switchView(tab.id);
+            tabButton.addEventListener('click', async () => {
+                await this.switchView(tab.id);
             });
         });
     }
 
-    private switchView(viewId: string): void {
+    private async switchView(viewId: string): Promise<void> {
         this.currentView = viewId;
         
         // Update active tab
@@ -122,10 +136,10 @@ export class VaultAnalysisModal extends Modal {
         }
         
         // Load new view content
-        this.loadView(viewId);
+        await this.loadView(viewId);
     }
 
-    private loadView(viewId: string): void {
+    private async loadView(viewId: string): Promise<void> {
         this.contentContainer.empty();
         
         switch (viewId) {
@@ -136,7 +150,7 @@ export class VaultAnalysisModal extends Modal {
                 this.loadKnowledgeStructureView();
                 break;
             case 'evolution':
-                this.loadKnowledgeEvolutionView();
+                await this.loadKnowledgeEvolutionView();
                 break;
             case 'actions':
                 this.loadRecommendedActionsView();
@@ -154,7 +168,16 @@ export class VaultAnalysisModal extends Modal {
         }
 
         // Summary section
-        const summaryContainer = this.contentContainer.createEl('div', { 
+        const summarySection = this.contentContainer.createEl('div', { 
+            cls: 'vault-analysis-section' 
+        });
+        
+        summarySection.createEl('h3', {
+            text: 'Analysis Summary',
+            cls: 'vault-analysis-section-title'
+        });
+        
+        const summaryContainer = summarySection.createEl('div', { 
             cls: 'vault-analysis-summary' 
         });
         
@@ -177,8 +200,17 @@ export class VaultAnalysisModal extends Modal {
             });
         }
 
-        // Search functionality
-        const searchContainer = this.contentContainer.createEl('div', { 
+        // Search section
+        const searchSection = this.contentContainer.createEl('div', { 
+            cls: 'vault-analysis-section' 
+        });
+        
+        searchSection.createEl('h3', {
+            text: 'Search & Filter',
+            cls: 'vault-analysis-section-title'
+        });
+        
+        const searchContainer = searchSection.createEl('div', { 
             cls: 'vault-analysis-search' 
         });
         
@@ -188,8 +220,17 @@ export class VaultAnalysisModal extends Modal {
             cls: 'vault-analysis-search-input'
         });
         
-        // Results container
-        const resultsContainer = this.contentContainer.createEl('div', { 
+        // Results section
+        const resultsSection = this.contentContainer.createEl('div', { 
+            cls: 'vault-analysis-section' 
+        });
+        
+        resultsSection.createEl('h3', {
+            text: 'Analysis Results',
+            cls: 'vault-analysis-section-title'
+        });
+        
+        const resultsContainer = resultsSection.createEl('div', { 
             cls: 'vault-analysis-results' 
         });
         
@@ -328,12 +369,17 @@ export class VaultAnalysisModal extends Modal {
     }
 
     private loadKnowledgeStructureView(): void {
-        const placeholderContainer = this.contentContainer.createEl('div', { 
-            cls: 'vault-analysis-placeholder' 
+        const structureSection = this.contentContainer.createEl('div', { 
+            cls: 'vault-analysis-section' 
         });
         
-        placeholderContainer.createEl('h3', {
-            text: 'Knowledge Structure Analysis'
+        structureSection.createEl('h3', {
+            text: 'Knowledge Structure Analysis',
+            cls: 'vault-analysis-section-title'
+        });
+        
+        const placeholderContainer = structureSection.createEl('div', { 
+            cls: 'vault-analysis-placeholder' 
         });
         
         if (!this.hasExistingData) {
@@ -364,58 +410,113 @@ export class VaultAnalysisModal extends Modal {
             cls: 'coming-soon'
         });
 
-        // Action buttons
+        // Action buttons section
+        const actionsSection = this.contentContainer.createEl('div', { 
+            cls: 'vault-analysis-section' 
+        });
+        
+        actionsSection.createEl('h3', {
+            text: 'Actions',
+            cls: 'vault-analysis-section-title'
+        });
+        
+        // Move the button creation context to this section
+        const originalContentContainer = this.contentContainer;
+        this.contentContainer = actionsSection;
         this.createActionButtons();
+        this.contentContainer = originalContentContainer;
     }
 
-    private loadKnowledgeEvolutionView(): void {
-        const placeholderContainer = this.contentContainer.createEl('div', { 
-            cls: 'vault-analysis-placeholder' 
-        });
-        
-        placeholderContainer.createEl('h3', {
-            text: 'Knowledge Evolution Analysis'
-        });
-        
-        if (!this.hasExistingData) {
-            placeholderContainer.createEl('p', {
-                text: 'Please generate vault analysis first to access this feature.',
-                cls: 'analysis-required'
-            });
-        } else {
-            placeholderContainer.createEl('p', {
-                text: 'This view will track how your knowledge has evolved over time, including:'
-            });
-            
-            const featureList = placeholderContainer.createEl('ul');
-            const features = [
-                'Timeline of knowledge development',
-                'Topic emergence and decline patterns',
-                'Note creation and modification trends',
-                'Learning trajectory visualization'
-            ];
-            
-            features.forEach(feature => {
-                featureList.createEl('li', { text: feature });
-            });
-        }
-        
-        placeholderContainer.createEl('p', {
-            text: 'This feature is coming soon!',
-            cls: 'coming-soon'
+    private async loadKnowledgeEvolutionView(): Promise<void> {
+        // Create the calendar section using consistent layout
+        const calendarSection = this.contentContainer.createEl('div', { 
+            cls: 'vault-analysis-section' 
         });
 
-        // Action buttons
-        this.createActionButtons();
+        calendarSection.createEl('h3', {
+            text: 'Knowledge Calendar',
+            cls: 'vault-analysis-section-title'
+        });
+
+        // Create the calendar chart container
+        const chartContainer = calendarSection.createEl('div', { 
+            cls: 'knowledge-evolution-container' 
+        });
+
+        // Add loading state
+        const loadingContainer = chartContainer.createEl('div', { 
+            cls: 'calendar-chart-loading' 
+        });
+        loadingContainer.createEl('p', { text: 'Generating knowledge evolution calendar...' });
+
+        try {
+            // Create calendar chart with settings
+            const calendarChart = new KnowledgeCalendarChart(
+                this.app,
+                chartContainer,
+                {
+                    cellSize: 11
+                },
+                this.settings.excludeFolders,
+                this.settings.excludeTags
+            );
+
+            // Remove loading state
+            loadingContainer.remove();
+
+            // Render the calendar chart
+            await calendarChart.render();
+
+            // Add disclaimer section
+            const disclaimerSection = this.contentContainer.createEl('div', { 
+                cls: 'vault-analysis-section'
+            });
+            
+            disclaimerSection.createEl('h3', {
+                text: 'About This Data',
+                cls: 'vault-analysis-section-title'
+            });
+            
+            const disclaimer = disclaimerSection.createEl('p', {
+                cls: 'calendar-disclaimer-text'
+            });
+            disclaimer.innerHTML = `
+                <strong>Note:</strong> This calendar shows your writing activity based on file modification times and word counts. 
+                The chart automatically displays all years with activity data. The intensity of each day represents the 
+                total words written across all modified files on that day.
+            `;
+
+        } catch (error) {
+            console.error('Error creating calendar chart:', error);
+            
+            // Remove loading state and show error
+            loadingContainer.remove();
+            
+            const errorContainer = chartContainer.createEl('div', { 
+                cls: 'calendar-chart-error' 
+            });
+            errorContainer.createEl('h4', { text: 'Error Loading Calendar' });
+            errorContainer.createEl('p', { 
+                text: 'There was an issue generating the knowledge evolution calendar. Please check the console for details.' 
+            });
+
+            // Action buttons for fallback
+            this.createActionButtons();
+        }
     }
 
     private loadRecommendedActionsView(): void {
-        const placeholderContainer = this.contentContainer.createEl('div', { 
-            cls: 'vault-analysis-placeholder' 
+        const recommendationsSection = this.contentContainer.createEl('div', { 
+            cls: 'vault-analysis-section' 
         });
         
-        placeholderContainer.createEl('h3', {
-            text: 'Recommended Actions'
+        recommendationsSection.createEl('h3', {
+            text: 'Recommended Actions',
+            cls: 'vault-analysis-section-title'
+        });
+        
+        const placeholderContainer = recommendationsSection.createEl('div', { 
+            cls: 'vault-analysis-placeholder' 
         });
         
         if (!this.hasExistingData) {
@@ -447,8 +548,21 @@ export class VaultAnalysisModal extends Modal {
             cls: 'coming-soon'
         });
 
-        // Action buttons
+        // Action buttons section
+        const actionsSection = this.contentContainer.createEl('div', { 
+            cls: 'vault-analysis-section' 
+        });
+        
+        actionsSection.createEl('h3', {
+            text: 'Actions',
+            cls: 'vault-analysis-section-title'
+        });
+        
+        // Move the button creation context to this section
+        const originalContentContainer = this.contentContainer;
+        this.contentContainer = actionsSection;
         this.createActionButtons();
+        this.contentContainer = originalContentContainer;
     }
 
     onClose() {

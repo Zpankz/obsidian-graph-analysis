@@ -1,0 +1,270 @@
+/* Calendar Chart Styles - GitHub Style */
+.calendar-chart-container {
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+}
+
+/* Summary Section */
+.calendar-summary {
+    margin: 0 0 20px 0;
+    padding: 15px;
+    background: var(--background-secondary);
+    border-radius: var(--radius-s);
+    border: 1px solid var(--background-modifier-border);
+    box-sizing: border-box;
+}
+
+.calendar-summary-stats {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    gap: 20px;
+}
+
+.summary-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    flex: 1;
+}
+
+.stat-label {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    font-weight: var(--font-medium);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stat-value {
+    font-size: var(--font-ui-large);
+    color: var(--text-normal);
+    font-weight: var(--font-bold);
+    line-height: 1.2;
+}
+
+/* Responsive summary */
+@media (max-width: 768px) {
+    .calendar-summary-stats {
+        flex-direction: column;
+        gap: 15px;
+    }
+    
+    .summary-stat {
+        flex-direction: row;
+        justify-content: space-between;
+        width: 100%;
+        align-items: center;
+    }
+    
+    .stat-label {
+        margin-bottom: 0;
+        margin-right: 10px;
+    }
+}
+
+.calendar-chart svg {
+    background: transparent;
+    overflow: visible;
+    width: 100%;
+    display: block;
+    box-sizing: border-box;
+}
+
+/* Ensure calendar chart container matches summary width */
+.calendar-chart-container > .calendar-chart-container {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.day-cell {
+    transition: all 0.1s ease;
+}
+
+.day-cell:hover {
+    stroke: var(--text-normal);
+    stroke-width: 1px;
+    opacity: 0.8;
+}
+
+/* Legend - Updated for gradient style */
+.calendar-legend {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    margin: 15px 0 0 0;
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+}
+
+.legend-label {
+    margin: 0 3px;
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+}
+
+/* Remove old legend item styles since we're using gradient now */
+.legend-item {
+    display: none;
+}
+
+/* Tooltip - Improved */
+.calendar-tooltip {
+    position: absolute;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    padding: 10px 12px;
+    font-size: var(--font-ui-small);
+    color: var(--text-normal);
+    box-shadow: var(--shadow-s);
+    z-index: 1000;
+    pointer-events: none;
+    max-width: 200px;
+    white-space: nowrap;
+}
+
+.tooltip-date {
+    font-weight: var(--font-medium);
+    margin-bottom: 6px;
+    color: var(--text-normal);
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding-bottom: 4px;
+}
+
+.tooltip-stats {
+    margin-top: 4px;
+}
+
+.tooltip-stats div {
+    margin: 2px 0;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .calendar-chart-container {
+        margin: 10px;
+        padding: 15px;
+    }
+    
+    .calendar-legend {
+        flex-direction: column;
+        gap: 10px;
+    }
+}
+
+/* Remove unwanted sections */
+.calendar-stats,
+.calendar-disclaimer,
+.calendar-refresh-btn,
+.calendar-chart-subtitle,
+.calendar-chart-header {
+    display: none !important;
+}
+
+/* Clean layout for modal - remove special styling to match other sections */
+.knowledge-evolution-container {
+    padding: 0;
+    margin: 0;
+    max-width: 100%;
+    overflow: visible;
+}
+
+/* Current week indicator */
+.current-week-indicator {
+    transition: opacity 0.3s ease;
+}
+
+.calendar-chart:hover .current-week-indicator {
+    opacity: 0.9 !important;
+}
+
+/* Day and month labels styling */
+.day-label {
+    font-family: var(--font-text);
+    font-size: 9px !important;
+    fill: var(--text-muted) !important;
+}
+
+text[font-size="10px"] {
+    font-family: var(--font-text) !important;
+    fill: var(--text-muted) !important;
+}
+
+text[font-size="14px"] {
+    font-family: var(--font-text) !important;
+    fill: var(--text-normal) !important;
+    font-weight: 600 !important;
+}
+
+/* Ensure proper spacing and alignment */
+.calendar-chart-container {
+    align-items: stretch;
+}
+
+/* Remove border on hover for cleaner look */
+.day-cell:hover {
+    stroke: rgba(27, 31, 35, 0.15);
+    stroke-width: 1px;
+}
+
+.theme-dark .day-cell:hover {
+    stroke: rgba(240, 246, 252, 0.3);
+    stroke-width: 1px;
+}
+
+/* Loading and error states */
+.calendar-chart-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    color: var(--text-muted);
+}
+
+.calendar-chart-loading::after {
+    content: '';
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--background-modifier-border);
+    border-top: 2px solid var(--text-accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-top: 10px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.calendar-chart-error {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-error);
+    background: var(--background-secondary);
+    border-radius: var(--radius-m);
+    border: 1px solid var(--background-modifier-border);
+}
+
+.calendar-chart-error h4 {
+    margin: 0 0 10px 0;
+    color: var(--text-error);
+}
+
+.calendar-chart-error p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+} 
