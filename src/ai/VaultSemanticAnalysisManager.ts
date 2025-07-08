@@ -3,7 +3,8 @@ import { GraphAnalysisSettings } from '../types/types';
 import { VaultAnalysisModal, VaultAnalysisInfoModal } from '../views/VaultAnalysisModals';
 import { 
     VaultAnalysisResult, 
-    VaultAnalysisData 
+    VaultAnalysisData,
+    MasterAnalysisManager
 } from './MasterAnalysisManager';
 import { AIModelService, TokenUsage } from '../services/AIModelService';
 import { GraphDataBuilder } from '../components/graph-view/data/graph-builder';
@@ -16,6 +17,9 @@ export class VaultSemanticAnalysisManager {
     private statusBarItem: HTMLElement | null = null;
     private graphDataBuilder: GraphDataBuilder;
     private pluginService: PluginService;
+    private masterAnalysisManager: MasterAnalysisManager;
+    private ddcSectionsList: Array<{id: string, name: string, division: string, mainClass: string}> = [];
+    private ddcTemplateLoaded: boolean = false;
 
     constructor(app: App, settings: GraphAnalysisSettings) {
         this.app = app;
@@ -23,6 +27,35 @@ export class VaultSemanticAnalysisManager {
         this.aiService = new AIModelService(settings);
         this.graphDataBuilder = new GraphDataBuilder(app);
         this.pluginService = new PluginService(app);
+        this.masterAnalysisManager = new MasterAnalysisManager(app, settings);
+    }
+
+    /**
+     * Load DDC template from MasterAnalysisManager
+     */
+    private async loadDDCTemplate(): Promise<boolean> {
+        if (this.ddcTemplateLoaded && this.ddcSectionsList.length > 0) {
+            return true; // Already loaded
+        }
+
+        try {
+            // Ensure DDC template is loaded in MasterAnalysisManager
+            const loaded = await this.masterAnalysisManager.ensureDDCTemplateLoaded();
+            if (!loaded) {
+                console.error('Failed to load DDC template from MasterAnalysisManager');
+                return false;
+            }
+
+            // Get the DDC sections list
+            this.ddcSectionsList = this.masterAnalysisManager.getAllDDCSections();
+            this.ddcTemplateLoaded = this.ddcSectionsList.length > 0;
+            
+            console.log(`📚 DDC template loaded for VaultSemanticAnalysisManager: ${this.ddcSectionsList.length} sections available`);
+            return this.ddcTemplateLoaded;
+        } catch (error) {
+            console.error('Failed to load DDC template for VaultSemanticAnalysisManager:', error);
+            return false;
+        }
     }
 
     public createGraphViewButton(container: HTMLElement): HTMLElement {
@@ -860,18 +893,43 @@ export class VaultSemanticAnalysisManager {
             };
         }
 
-        // Build the batch prompt
+        // Ensure DDC template is loaded
+        await this.loadDDCTemplate();
+
+        // Generate optimized sections list for AI prompt in JSON format
+        const sectionsJson = JSON.stringify(
+            this.ddcSectionsList.map(section => ({
+                id: section.id,
+                name: section.name
+            }))
+        );
+
+        // Build the batch prompt with DDC classification instructions
         let prompt = `Analyze the following ${meaningfulFiles.length} notes and provide analysis for each one. For each note, provide:
-1. A one-sentence summary of the main concept or purpose
+1. A two to three sentence summary of the main concept or purpose (be detailed)
 2. 3-6 key terms or phrases (comma-separated)
-3. 2-4 knowledge domains or fields this content belongs to (comma-separated)
+3. DDC classification codes that best match the content (comma-separated)
+
+## DDC Classification Task
+Classify each note into the most appropriate Dewey Decimal Classification (DDC) sections. Each note should be classified with one or more DDC section codes from the reference list below.
+
+### Classification Guidelines:
+- Be specific - use the most detailed section that applies
+- A note can belong to multiple sections if it spans different domains
+- Only use DDC codes from the provided reference list
+- Format the knowledgeDomain field as comma-separated DDC codes (e.g., "0-0-4,1-5-1")
+
+**DDC Sections Reference**:
+\`\`\`json
+${sectionsJson}
+\`\`\`
 
 Format your response as a JSON array with exactly ${meaningfulFiles.length} objects in this format:
 [
   {
-    "summary": "One sentence summary",
+    "summary": "Two to three sentence summary",
     "keywords": "keyword1, keyword2, keyword3",
-    "knowledgeDomain": "domain1, domain2, domain3"
+    "knowledgeDomain": "0-0-4,1-5-1"
   },
   ...
 ]
@@ -892,7 +950,7 @@ Notes to analyze:
                 knowledgeDomain: string;
             }>(prompt, meaningfulFiles.length);
 
-            console.log(`Batch analysis completed. Token usage: ${response.tokenUsage.totalTokens} total (${response.tokenUsage.promptTokens} prompt + ${response.tokenUsage.candidatesTokens} response)`);
+            console.log(`Batch analysis completed with DDC classification. Token usage: ${response.tokenUsage.totalTokens} total (${response.tokenUsage.promptTokens} prompt + ${response.tokenUsage.candidatesTokens} response)`);
 
             return {
                 results: response.results.map(item => ({
