@@ -1,29 +1,13 @@
 import { App } from 'obsidian';
-import { GraphAnalysisSettings } from '../../types/types';
+import { GraphAnalysisSettings, HierarchicalDomain, DomainConnection } from '../../types/types';
 import * as d3 from 'd3';
+import { VaultAnalysisResult, MasterAnalysisManager, VaultAnalysisData } from '../../ai/MasterAnalysisManager';
 
 export interface DomainData {
     domain: string;
     noteCount: number;
     avgCentrality: number;
     keywords: string[];
-}
-
-export interface HierarchicalDomain {
-    name: string;
-    noteCount: number;
-    avgCentrality?: number;
-    children?: HierarchicalDomain[];
-    keywords?: string[];
-    level?: number;
-    parent?: string;
-    ddcCode?: string; // DDC (Dewey Decimal Classification) code
-}
-
-export interface DomainConnection {
-    source: string;
-    target: string;
-    strength: number;
 }
 
 export interface DomainDistributionData {
@@ -64,6 +48,7 @@ export class DomainDistributionChart {
     private container: HTMLElement;
     private data: DomainDistributionData | null = null;
     private options: DomainChartOptions;
+    private masterAnalysisManager: MasterAnalysisManager;
 
     constructor(
         app: App, 
@@ -80,27 +65,106 @@ export class DomainDistributionChart {
             showLabels: true,
             ...options
         };
+        this.masterAnalysisManager = new MasterAnalysisManager(app, settings);
+
+        // Listen for theme or accent color changes and refresh chart
+        // Obsidian emits 'css-change' on the workspace container
+        const workspace = document.querySelector('.workspace');
+        if (workspace) {
+            this._themeChangeHandler = () => this.refresh();
+            workspace.addEventListener('css-change', this._themeChangeHandler);
+        }
+    }
+
+    // Add a destructor to remove the event listener when the chart is destroyed
+    private _themeChangeHandler?: () => void;
+    public destroy(): void {
+        const workspace = document.querySelector('.workspace');
+        if (workspace && this._themeChangeHandler) {
+            workspace.removeEventListener('css-change', this._themeChangeHandler);
+        }
     }
 
     public async loadCachedData(): Promise<DomainDistributionData | null> {
         try {
-            const filePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/master-analysis.json`;
-            const content = await this.app.vault.adapter.read(filePath);
-            const masterData = JSON.parse(content);
-            
-            if (masterData?.knowledgeStructure?.domainHierarchy) {
-                return {
-                    domainHierarchy: masterData.knowledgeStructure.domainHierarchy,
-                    domainConnections: masterData.knowledgeStructure.domainConnections
-                };
+            // First try to load from the new structure-specific analysis file
+            try {
+                const structureFilePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/responses/structure-analysis.json`;
+                const structureContent = await this.app.vault.adapter.read(structureFilePath);
+                const structureData = JSON.parse(structureContent);
+                
+                if (structureData?.knowledgeStructure?.domainHierarchy) {
+                    console.log('Using structure-specific analysis for domain distribution chart');
+                    return {
+                        domainHierarchy: structureData.knowledgeStructure.domainHierarchy,
+                        domainConnections: structureData.knowledgeStructure.domainConnections
+                    };
+                }
+            } catch (structureError) {
+                console.log('No structure-specific analysis found, will try other methods');
             }
-            return null;
+            
+            // Then try to load from the master analysis file (legacy approach)
+            try {
+                const masterFilePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/master-analysis.json`;
+                const masterContent = await this.app.vault.adapter.read(masterFilePath);
+                const masterData = JSON.parse(masterContent);
+                
+                if (masterData?.knowledgeStructure?.domainHierarchy) {
+                    console.log('Using master analysis for domain distribution chart');
+                    return {
+                        domainHierarchy: masterData.knowledgeStructure.domainHierarchy,
+                        domainConnections: masterData.knowledgeStructure.domainConnections
+                    };
+                }
+            } catch (masterError) {
+                console.log('No master analysis found, will try building from vault analysis');
+            }
+            
+            // Finally, try to build directly from vault analysis data (new approach)
+            return await this.buildHierarchyFromVaultAnalysis();
         } catch (error) {
             console.warn('No cached domain distribution data found:', error);
             return null;
         }
     }
-
+    
+    /**
+     * Build domain hierarchy directly from vault analysis data
+     * This is the new approach that doesn't rely on AI to build the hierarchy
+     */
+    private async buildHierarchyFromVaultAnalysis(): Promise<DomainDistributionData | null> {
+        try {
+            // Load vault analysis data
+            const filePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/vault-analysis.json`;
+            const content = await this.app.vault.adapter.read(filePath);
+            const vaultData = JSON.parse(content) as VaultAnalysisData;
+            
+            if (!vaultData?.results || vaultData.results.length === 0) {
+                console.log('No vault analysis data found or empty results');
+                return null;
+            }
+            
+            console.log(`Building domain hierarchy from ${vaultData.results.length} notes using MasterAnalysisManager`);
+            
+            // Ensure DDC template is loaded in MasterAnalysisManager
+            await this.masterAnalysisManager.ensureDDCTemplateLoaded();
+            
+            // Use MasterAnalysisManager's implementation to build the hierarchy
+            const domainHierarchy = this.masterAnalysisManager.buildHierarchyFromVaultData(vaultData);
+            
+            return {
+                domainHierarchy,
+                domainConnections: []
+            };
+        } catch (error) {
+            console.error('Failed to build hierarchy from vault analysis:', error);
+            return null;
+        }
+    }
+    
+    // Remove the redundant helper methods as they're now in MasterAnalysisManager
+    
     public async render(): Promise<void> {
         this.container.empty();
         
@@ -216,6 +280,26 @@ export class DomainDistributionChart {
     }
 
     private renderSunburstChart(container: HTMLElement = this.container): void {
+        // Helper function for vivid HSL color palette based on accent color
+        const getVividAccentColor = (i: number, total: number): string => {
+            const rootStyle = getComputedStyle(document.documentElement);
+            const h = rootStyle.getPropertyValue('--accent-h').trim();
+            const s = rootStyle.getPropertyValue('--accent-s').trim();
+            const l = rootStyle.getPropertyValue('--accent-l').trim();
+            let hue = 265; // fallback to purple
+            let baseSat = 0.8;
+            let baseLight = 0.5;
+            if (h && s && l) {
+                hue = parseFloat(h);
+                baseSat = Math.max(0.7, Math.min(1, parseFloat(s) / 100));
+                baseLight = Math.max(0.35, Math.min(0.65, parseFloat(l) / 100));
+            }
+            // Vary lightness for each section, keep saturation high for vividness
+            const lightness = 0.38 + 0.22 * (i / Math.max(1, total - 1));
+            const saturation = 0.85; // fixed high saturation for vividness
+            return `hsl(${hue}, ${Math.round(saturation * 100)}%, ${Math.round(lightness * 100)}%)`;
+        };
+
         // Get container dimensions for responsive sizing
         const containerWidth = container.clientWidth || 500;
         
@@ -268,8 +352,7 @@ export class DomainDistributionChart {
             return acc;
         }, {}));
 
-        // Create color scale - simpler approach using D3 standard colors
-        const color = d3.scaleOrdinal(d3.quantize(d3.interpolateRainbow, (hierarchyData.children?.length || 0) + 1));
+        // Remove color palette generation. We'll use CSS variables for fill and filter for distinction.
 
         // Create the arc generator following D3 example
         const arc = d3.arc<any>()
@@ -311,21 +394,33 @@ export class DomainDistributionChart {
         const g = svg.append('g');
 
         // Create all arcs (excluding root) - show all layers immediately
+        const descendants = root.descendants().slice(1);
+        const totalTopLevel = hierarchyData.children?.length || 1;
         const paths = g.selectAll('path')
-            .data(root.descendants().slice(1)) // Standard D3 approach - all descendants except root
+            .data(descendants)
             .enter().append('path')
             .attr('d', arc)
             .attr('fill', (d: any) => {
-                // Color based on top-level category for consistency
-                while (d.depth > 1) d = d.parent;
-                return color(d.data.name);
+                // Use vivid accent color for top-level sections, inherit for children
+                let topIndex = 0;
+                let ancestor = d;
+                while (ancestor.depth > 1) ancestor = ancestor.parent;
+                if (ancestor.parent) {
+                    topIndex = ancestor.parent.children.indexOf(ancestor);
+                } else if (ancestor.depth === 1 && ancestor.parent) {
+                    topIndex = ancestor.parent.children.indexOf(ancestor);
+                } else if (ancestor.depth === 1) {
+                    topIndex = descendants.filter(x => x.depth === 1).indexOf(ancestor);
+                }
+                const total = totalTopLevel;
+                return getVividAccentColor(topIndex, total);
             })
             .attr('fill-opacity', (d: any) => arcVisible(d) ? (d.children ? 0.6 : 0.4) : 0)
             .attr('stroke', 'var(--background-primary)')
             .attr('stroke-width', 1)
             .attr('pointer-events', (d: any) => arcVisible(d) ? 'auto' : 'none')
-            .style('cursor', 'default') // Removed pointer cursor since no click functionality
-            .style('transition', 'opacity 0.2s ease, filter 0.2s ease'); // Simplified transitions
+            .style('cursor', 'default')
+            .style('transition', 'opacity 0.2s ease, filter 0.2s ease');
 
         // Add tooltips to paths
         const format = d3.format(',d');
@@ -345,33 +440,94 @@ export class DomainDistributionChart {
                 return info.join('\n');
             });
 
-        // Add labels - show all labels for visible arcs
-        const labels = g.append('g')
+        // Add labels with text wrapping for long labels
+        const labelGroups = g.append('g')
             .attr('pointer-events', 'none')
             .attr('text-anchor', 'middle')
             .style('user-select', 'none')
-            .selectAll('text')
+            .selectAll('g')
             .data(root.descendants().slice(1))
-            .enter().append('text')
-            .attr('dy', '0.35em')
-            .attr('fill-opacity', (d: any) => +labelVisible(d))
+            .enter().append('g')
             .attr('transform', (d: any) => labelTransform(d))
-            .attr('fill', 'var(--text-normal)')
-            .style('font-size', (d: any) => {
-                // Adjust font size based on depth and arc size
-                const baseSize = Math.max(8, radius * 0.08);
-                const depthFactor = Math.max(0.6, 1 - (d.depth - 1) * 0.1);
-                return `${baseSize * depthFactor}px`;
-            })
-            .text((d: any) => {
-                // Show abbreviated names for smaller arcs
-                const arcSize = (d.y1 - d.y0) * (d.x1 - d.x0);
-                const name = d.data.name;
-                if (arcSize < 0.1 && name.length > 8) {
-                    return name.substring(0, 8) + '...';
+            .style('opacity', (d: any) => +labelVisible(d));
+
+        labelGroups.each(function(d: any) {
+            const group = d3.select(this);
+            const arcSize = (d.y1 - d.y0) * (d.x1 - d.x0);
+            const name = d.data.name;
+            
+            // Calculate available width for text based on arc size
+            const availableWidth = Math.max(10, (d.y1 - d.y0) * radius * 0.8);
+            const fontSize = Math.max(8, radius * 0.08 * Math.max(0.6, 1 - (d.depth - 1) * 0.1));
+            
+            // Skip tiny arcs
+            if (arcSize < 0.02) return;
+            
+            // For very small arcs, just show abbreviated text
+            if (arcSize < 0.1) {
+                group.append('text')
+                    .attr('dy', '0.35em')
+                    .attr('fill', 'var(--text-normal)')
+                    .style('font-size', `${fontSize}px`)
+                    .text(name.length > 8 ? name.substring(0, 8) + '...' : name);
+                return;
+            }
+            
+            // For larger arcs, implement text wrapping
+            const words = name.split(/\s+/);
+            let line: string[] = [];
+            let lineNumber = 0;
+            let tspan = group.append('text')
+                .attr('dy', 0)
+                .attr('fill', 'var(--text-normal)')
+                .style('font-size', `${fontSize}px`)
+                .append('tspan')
+                .attr('x', 0)
+                .attr('y', 0);
+            
+            // Simple text wrapping algorithm
+            let currentLine = '';
+            words.forEach((word: string) => {
+                const testLine = currentLine ? `${currentLine} ${word}` : word;
+                // Estimate text width (rough approximation)
+                const estimatedWidth = testLine.length * (fontSize * 0.6);
+                
+                if (estimatedWidth > availableWidth && currentLine) {
+                    // Add current line and start a new one
+                    tspan = group.select('text')
+                        .append('tspan')
+                        .attr('x', 0)
+                        .attr('y', 0)
+                        .attr('dy', `${++lineNumber * 1.1}em`)
+                        .text(currentLine);
+                    currentLine = word;
+                } else {
+                    currentLine = testLine;
                 }
-                return name;
             });
+            
+            // Add the last line
+            if (currentLine) {
+                tspan = group.select('text')
+                    .append('tspan')
+                    .attr('x', 0)
+                    .attr('y', 0)
+                    .attr('dy', `${lineNumber * 1.1}em`)
+                    .text(currentLine);
+            }
+            
+            // Center the text vertically
+            const textElement = group.select('text');
+            const numLines = textElement.selectAll('tspan').size();
+            if (numLines > 1) {
+                const offset = -(numLines - 1) * 0.5 * 1.1;
+                textElement.selectAll('tspan').each(function(d: any, i: number) {
+                    d3.select(this).attr('dy', `${offset + i * 1.1}em`);
+                });
+            } else {
+                textElement.attr('dy', '0.35em');
+            }
+        });
 
         // Create enlarged center circle for info panel
         const centerRadius = Math.max(radius * 0.9, 40);
@@ -466,20 +622,10 @@ export class DomainDistributionChart {
                     .style('font-size', '1px')
                     .text('');
 
-                if (data.data.ddcCode) {
-                    textContainer.append('tspan')
-                        .attr('x', 0)
-                        .attr('dy', '1.2em')
-                        .style('font-size', Math.max(centerRadius * 0.10, 8) + 'px')
-                        .style('fill', 'var(--text-muted)')
-                        .text(`DDC: ${data.data.ddcCode}`);
-                    currentLine++;
-                }
-
                 textContainer.append('tspan')
                     .attr('x', 0)
-                    .attr('dy', lineHeight)
-                    .style('font-size', Math.max(centerRadius * 0.10, 7) + 'px')
+                    .attr('dy', '1.2em')
+                    .style('font-size', Math.max(centerRadius * 0.10, 8) + 'px')
                     .style('fill', 'var(--text-muted)')
                     .text(layerName);
                 currentLine++;
@@ -525,7 +671,7 @@ export class DomainDistributionChart {
 
             } else {
                 // Show default hierarchy information
-                const totalNotes = root.value || 0;
+                const totalDomainSections = root.descendants().filter(d => d.depth > 0).length;
                 const layerCount = hierarchy.height;
                 
                 textContainer.append('tspan')
@@ -536,7 +682,7 @@ export class DomainDistributionChart {
                     .style('fill', 'var(--text-accent)')
                     .text('DDC Hierarchy');
 
-                if (totalNotes > 0) {
+                if (totalDomainSections > 0) {
                     textContainer.append('tspan')
                         .attr('x', 0)
                         .attr('dy', '1.4em')
@@ -549,14 +695,14 @@ export class DomainDistributionChart {
                         .style('font-size', Math.max(centerRadius * 0.26, 16) + 'px')
                         .style('font-weight', '700')
                         .style('fill', 'var(--text-normal)')
-                        .text(totalNotes.toString());
+                        .text(totalDomainSections.toString());
 
                     textContainer.append('tspan')
                         .attr('x', 0)
                         .attr('dy', '1.2em')
                         .style('font-size', Math.max(centerRadius * 0.12, 9) + 'px')
                         .style('fill', 'var(--text-muted)')
-                        .text('total notes');
+                        .text('domain sections');
 
                     textContainer.append('tspan')
                         .attr('x', 0)

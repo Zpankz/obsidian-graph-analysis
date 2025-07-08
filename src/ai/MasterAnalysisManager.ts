@@ -1,18 +1,18 @@
 import { App } from 'obsidian';
-import { GraphAnalysisSettings } from '../types/types';
+import { GraphAnalysisSettings, HierarchicalDomain, DomainConnection } from '../types/types';
+import { KnowledgeStructureData } from './visualization/KnowledgeStructureManager';
 import { 
-    KnowledgeStructureData,
-    KnowledgeEvolutionData, 
-    KnowledgeActionsData,
+    KnowledgeEvolutionData,
     TimelineAnalysis,
     TopicPatternsAnalysis,
     FocusShiftAnalysis,
     LearningVelocityAnalysis,
-    EvolutionInsight,
-    HierarchicalDomain,
-    DomainConnection
-} from './visualization/managers';
+    EvolutionInsight
+} from './visualization/KnowledgeEvolutionManager';
+import { KnowledgeActionsData } from './visualization/KnowledgeActionsManager';
 import { AIModelService, TokenUsage } from '../services/AIModelService';
+
+// Remove re-export since we now import directly from types.ts
 
 export interface VaultAnalysisResult {
     id: string;
@@ -359,43 +359,19 @@ export class MasterAnalysisManager {
             const jsonStr = jsonMatch[1];
             const parsedJson = JSON.parse(jsonStr);
             
-            // Extract domain distribution data
+            // Extract domain distribution data - now we only need summary indicators
             const domainDistribution = parsedJson.knowledgeDomainDistribution;
             
-            if (!domainDistribution || !domainDistribution.sectionClassification) {
+            if (!domainDistribution) {
                 throw new Error('Invalid knowledge domain distribution data');
             }
             
             // Extract summary indicators
             const summaryIndicators = domainDistribution.summary || null;
             
-            // Extract section classification - this is now the primary data structure
-            const sectionClassification = domainDistribution.sectionClassification;
-            
-            // Log the number of sections for debugging
-            const sectionCount = Object.keys(sectionClassification).length;
-            console.log(`Found ${sectionCount} sections in AI classification response`);
-            
-            // Create a map of domains to notes for building the hierarchy
-            const domainMap = new Map<string, VaultAnalysisResult[]>();
-            
-            // Process each note to extract its knowledge domain
-            analysisData.results.forEach(note => {
-                if (note.knowledgeDomain) {
-                    // Split multiple domains if they exist
-                    const domains = note.knowledgeDomain.split(',').map(d => d.trim());
-                    
-                    domains.forEach(domain => {
-                        if (!domainMap.has(domain)) {
-                            domainMap.set(domain, []);
-                        }
-                        domainMap.get(domain)!.push(note);
-                    });
-                }
-            });
-            
-            // Build hierarchical domain structure from section classification
-            const domainHierarchy = this.buildHierarchyFromSections(sectionClassification);
+            // Build hierarchical domain structure directly from vault analysis data
+            // instead of using sectionClassification from AI response
+            const domainHierarchy = this.buildHierarchyFromVaultData(analysisData);
             
             // Extract knowledge network data
             const knowledgeNetwork = parsedJson.knowledgeNetwork || {
@@ -416,8 +392,8 @@ export class MasterAnalysisManager {
                 keyPoints: [
                     summaryIndicators ? `Top domain: ${summaryIndicators.topDomain.name}` : "No top domain identified",
                     summaryIndicators ? `Recent focus: ${summaryIndicators.recentFocus.name}` : "No recent focus identified",
-                    summaryIndicators ? `Growth trend: ${summaryIndicators.growthTrend.description}` : "No growth trend identified",
-                    `Classified into ${sectionCount} different knowledge sections`
+                    summaryIndicators ? `Growth trend: ${summaryIndicators.growthTrend.description || summaryIndicators.growthTrend.percentage + '%'}` : "No growth trend identified",
+                    `Classified into ${domainHierarchy.length} different knowledge areas`
                 ]
             }];
             
@@ -435,40 +411,59 @@ export class MasterAnalysisManager {
     }
 
     /**
-     * Build hierarchical domain structure from section classification
-     * This builds a 2-level hierarchy: Main Class > Section (skipping Division level)
+     * Build hierarchical domain structure directly from vault analysis data
+     * This builds a 3-level hierarchy: Main Class > Division > Section
      */
-    private buildHierarchyFromSections(
-        sectionClassification: any
+    public buildHierarchyFromVaultData(
+        analysisData: VaultAnalysisData
     ): HierarchicalDomain[] {
-        // Create a map for the top-level main classes (based on the first digit of section ID)
+        // Create maps for DDC hierarchy
         const classMap = new Map<string, HierarchicalDomain>();
+        const divisionMap = new Map<string, HierarchicalDomain>();
+        const sectionMap = new Map<string, HierarchicalDomain>();
         
-        // Track section count for debugging
-        let validSectionCount = 0;
-        let invalidSectionCount = 0;
+        // Count notes per DDC section
+        const sectionCounts = new Map<string, number>();
+        const sectionNotes = new Map<string, VaultAnalysisResult[]>();
         
-        // Process each section in the classification
-        Object.entries(sectionClassification).forEach(([sectionId, sectionData]: [string, any]) => {
-            if (!this.isValidDDCSectionId(sectionId)) {
-                console.warn(`Invalid DDC section ID: ${sectionId}`);
-                invalidSectionCount++;
-                return;
+        // Process each note to extract its DDC codes
+        analysisData.results.forEach(note => {
+            if (note.knowledgeDomain) {
+                // Split multiple domains if they exist
+                const domains = note.knowledgeDomain.split(',').map(d => d.trim());
+                
+                domains.forEach(domain => {
+                    // Skip empty domains
+                    if (!domain) return;
+                    
+                    // Skip invalid DDC codes
+                    if (!this.isValidDDCSectionId(domain)) {
+                        console.warn(`Invalid DDC section ID: ${domain} in note: ${note.title}`);
+                        return;
+                    }
+                    
+                    // Update section count
+                    sectionCounts.set(domain, (sectionCounts.get(domain) || 0) + 1);
+                    
+                    // Add note to section
+                    if (!sectionNotes.has(domain)) {
+                        sectionNotes.set(domain, []);
+                    }
+                    sectionNotes.get(domain)!.push(note);
+                });
             }
-            
-            validSectionCount++;
-            
-            // Extract class ID from the section ID (first digit)
+        });
+        
+        // Build hierarchy from section counts
+        sectionCounts.forEach((count, sectionId) => {
+            // Extract class and division IDs
             const classId = this.getClassIdFromSection(sectionId);
+            const divisionId = this.getDivisionIdFromSection(sectionId);
             
             // Get section info
             const sectionInfo = this.getDDCSectionInfo(sectionId);
-            if (!sectionInfo) {
-                console.warn(`Section info not found for: ${sectionId}`);
-                return;
-            }
             
-            // Get or create main class node (top level)
+            // Create or update class node
             if (!classMap.has(classId)) {
                 const className = this.ddcMainClasses[classId] || `Class ${classId}`;
                 
@@ -481,33 +476,98 @@ export class MasterAnalysisManager {
                 });
             }
             
-            // Create section node (second level)
+            // Create or update division node
+            if (!divisionMap.has(divisionId)) {
+                const divisionName = this.ddcDivisions[divisionId] || `Division ${divisionId.split('-')[1] || '0'}`;
+                
+                const divisionNode: HierarchicalDomain = {
+                    name: divisionName,
+                    noteCount: 0,
+                    children: [],
+                    level: 2,
+                    ddcCode: divisionId,
+                    parent: classId
+                };
+                
+                divisionMap.set(divisionId, divisionNode);
+                
+                // Add division to its class
+                const classNode = classMap.get(classId);
+                if (classNode && classNode.children) {
+                    classNode.children.push(divisionNode);
+                }
+            }
+            
+            // Create section node
             const sectionNode: HierarchicalDomain = {
-                name: sectionData.sectionName || sectionInfo.name,
-                noteCount: sectionData.noteCount || 0,
-                keywords: sectionData.keywords || [],
-                level: 2,
+                name: sectionInfo ? sectionInfo.name : this.ddcSections[sectionId] || `Section ${sectionId.split('-')[2] || '0'}`,
+                noteCount: count,
+                level: 3,
                 ddcCode: sectionId,
-                parent: classId
+                parent: divisionId
             };
             
-            // Add section to its parent main class
-            const classNode = classMap.get(classId);
-            if (classNode && classNode.children) {
-                classNode.children.push(sectionNode);
+            // Calculate average centrality if available
+            const notesInSection = sectionNotes.get(sectionId) || [];
+            if (notesInSection.length > 0) {
+                let totalCentrality = 0;
+                let centralityCount = 0;
                 
-                // Update note count for the main class
-                classNode.noteCount += sectionNode.noteCount;
+                notesInSection.forEach(note => {
+                    if (note.graphMetrics?.betweennessCentrality) {
+                        totalCentrality += note.graphMetrics.betweennessCentrality;
+                        centralityCount++;
+                    }
+                });
+                
+                if (centralityCount > 0) {
+                    sectionNode.avgCentrality = totalCentrality / centralityCount;
+                }
+            }
+            
+            // Extract keywords
+            const keywords = new Map<string, number>();
+            notesInSection.forEach(note => {
+                if (note.keywords) {
+                    note.keywords.split(',').forEach(keyword => {
+                        const k = keyword.trim();
+                        if (k) {
+                            keywords.set(k, (keywords.get(k) || 0) + 1);
+                        }
+                    });
+                }
+            });
+            
+            // Get top 5 keywords
+            sectionNode.keywords = Array.from(keywords.entries())
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5)
+                .map(entry => entry[0]);
+            
+            // Add section to its division
+            const divisionNode = divisionMap.get(divisionId);
+            if (divisionNode && divisionNode.children) {
+                divisionNode.children.push(sectionNode);
+                
+                // Update note count for division
+                divisionNode.noteCount += count;
+                
+                // Update note count for class
+                const classNode = classMap.get(classId);
+                if (classNode) {
+                    classNode.noteCount += count;
+                }
             }
         });
         
-        // Log section processing results
-        console.log(`Processed ${validSectionCount} valid sections and skipped ${invalidSectionCount} invalid sections`);
-        console.log(`Created ${classMap.size} main class nodes in the hierarchy`);
-        
         // Convert the map to an array and sort by note count (descending)
-        return Array.from(classMap.values())
+        const hierarchy = Array.from(classMap.values())
+            .filter(node => node.noteCount > 0) // Only include non-empty classes
             .sort((a, b) => b.noteCount - a.noteCount);
+        
+        console.log(`Built domain hierarchy with ${hierarchy.length} classes, ${divisionMap.size} divisions, and ${sectionCounts.size} sections`);
+        
+        return hierarchy;
     }
 
     /**
@@ -657,23 +717,11 @@ export class MasterAnalysisManager {
             throw new Error('DDC template not loaded. Please ensure the DDC-template.json file is properly copied to the plugin directory.');
         }
 
-        // Generate optimized sections list for AI prompt in JSON format
-        const sectionsJson = JSON.stringify(
-            this.ddcSectionsList.map(section => ({
-                id: section.id,
-                name: section.name
-            }))
-        );
-
         return `# KNOWLEDGE STRUCTURE ANALYSIS
-
-## DDC Classification Task
-You are analyzing a knowledge vault containing notes with various topics and domains. Your task is to map the knowledge domains in this vault to the Dewey Decimal Classification (DDC) system.
 
 ## Input Data Description
 The input data contains:
-- Notes with titles, summaries, and assigned knowledge domains
-- Each note has a "knowledgeDomain" field containing user-defined categories
+- Notes with titles, summaries, and knowledge domains (already classified with DDC section codes)
 - Notes may have graph metrics showing their centrality in the knowledge network
 - Creation and modification dates for tracking knowledge evolution
 
@@ -685,31 +733,19 @@ You MUST output a JSON object with the following structure:
     "summary": {
       "topDomain": {
         "percentage": 51,
-        "name": "Technology"
+        "name": "domain section name"
       },
       "bridgeMaker": {
         "score": 0.229,
-        "name": "Ancient History"
+        "name": "domain section name"
       },
       "growthTrend": {
         "percentage": 62,
-        "description": "Increasing Depth"
+        "name": "domain section name"
       },
       "recentFocus": {
         "count": 6,
-        "name": "AI Ethics"
-      }
-    },
-    "sectionClassification": {
-      "0-0-4": {
-        "sectionName": "Computer science",
-        "noteCount": 15,
-        "keywords": ["algorithms", "data structures", "programming"]
-      },
-      "1-5-1": {
-        "sectionName": "Perception, movement, emotions & drives",
-        "noteCount": 8,
-        "keywords": ["cognition", "behavior", "mental processes"]
+        "name": "domain section name"
       }
     }
   },
@@ -746,35 +782,19 @@ You MUST output a JSON object with the following structure:
 }
 \`\`\`
 
-### Important Requirements for Classification
-1. **Be comprehensive and detailed** - Analyze each note thoroughly and classify it into ALL relevant DDC sections
-2. **Use DDC sections as the primary classification unit** - Each note should be classified into one or more DDC sections
-3. **Notes can belong to multiple sections** - A single note may contain knowledge that spans multiple domains
-4. **Count notes accurately** - The noteCount should reflect the actual number of notes touching that section
-5. **Extract relevant keywords** - Use the note summaries and titles to identify key concepts for each section
-6. **ONLY include sections that match the user's actual content** - Do not include sections that aren't represented in the vault
-7. **Be generous with classification** - If a note contains even a small reference to a topic, include it in that section
-
 ### Important Requirements for Summary Indicators
 1. **Top Domain**: The most prevalent knowledge domain by percentage of notes
 2. **Bridge Maker**: The domain that best connects different areas based on betweenness centrality
 3. **Growth Trend**: The domain showing the most growth based on recent note creation/modification
 4. **Recent Focus**: The domain with the most notes created/modified in the last month
 
-### Classification Approach
-1. First, read each note's title, summary, and knowledge domain carefully
-2. Identify ALL potential DDC sections that might apply to the note's content
-3. For each identified section, check if it's in the DDC Sections Reference
-4. Add the note to ALL relevant sections, not just the most obvious one
-5. If a note touches on multiple subjects, it should be counted in multiple sections
-6. Be specific - use the most detailed section that applies rather than a general one
+### Analysis Approach
+1. Use the already classified DDC section codes in each note's knowledgeDomain field
+2. Calculate summary indicators based on the distribution of these DDC codes
+3. Identify knowledge network elements (bridges, foundations, authorities) based on centrality metrics
+4. Identify potential knowledge gaps based on the overall domain distribution
 
-**DDC Sections Reference**:
-\`\`\`json
-${sectionsJson}
-\`\`\`
-
-CRITICAL: Your response MUST include the full JSON structure with all required sections. Only include DDC sections that are actually represented in the user's vault content, but be thorough in identifying ALL relevant sections for each note.`;
+CRITICAL: Your response MUST include the full JSON structure with all required sections. Focus on providing accurate summary indicators and network analysis based on the pre-classified notes.`;
     }
 
 
@@ -964,15 +984,14 @@ ${this.generateEvolutionAnalysisPrompt()}
 ${this.generateActionsAnalysisPrompt()}
 
 **CRITICAL REMINDERS**:
-1. Only include DDC sections that are ACTUALLY represented in the user's vault content
-2. Use the actual knowledge domains from the data (found in the "knowledgeDomain" field)
+1. Notes are already classified with DDC section codes in their knowledgeDomain field
+2. Focus on providing accurate summary indicators and network analysis
 3. Your response MUST include the full JSON structure with all required sections:
-   - knowledgeDomainDistribution with summary and sectionClassification
+   - knowledgeDomainDistribution with summary
    - knowledgeNetwork
    - knowledgeGaps
 4. Provide accurate summary indicators (topDomain, bridgeMaker, growthTrend, recentFocus)
-5. Focus on accurate classification of knowledge domains to DDC sections
-6. Do NOT return a template response - analyze the actual content and provide real insights`;
+5. Do NOT return a template response - analyze the actual content and provide real insights`;
     }
 
     /**
@@ -982,50 +1001,9 @@ ${this.generateActionsAnalysisPrompt()}
         aiResponse: string, 
         analysisData: VaultAnalysisData
     ): Promise<HierarchicalDomain[]> {
-        // Parse the AI response to extract section classification
-        const knowledgeStructureMatch = aiResponse.match(/# KNOWLEDGE STRUCTURE ANALYSIS\s*([\s\S]*?)(?=\n# |\n---|\n# |$)/i);
-        const knowledgeStructureSection = knowledgeStructureMatch ? knowledgeStructureMatch[1].trim() : '';
-        
-        // Build domain map from analysis data
-        const domainMap = new Map<string, VaultAnalysisResult[]>();
-        analysisData.results.forEach(note => {
-            if (note.knowledgeDomain) {
-                const domains = note.knowledgeDomain.split(',').map(d => d.trim());
-                domains.forEach(domain => {
-                    if (!domainMap.has(domain)) {
-                        domainMap.set(domain, []);
-                    }
-                    domainMap.get(domain)!.push(note);
-                });
-            }
-        });
-
-        // Extract and validate section classification
-        try {
-            const jsonMatch = knowledgeStructureSection.match(/```json\s*([\s\S]*?)\s*```/);
-            if (jsonMatch) {
-                const responseData = JSON.parse(jsonMatch[1]);
-                if (responseData.sectionClassification) {
-                    console.log('Processing DDC section classification for visualization');
-                    
-                    // Validate all section IDs exist in our template
-                    const validSections: any = {};
-                    Object.entries(responseData.sectionClassification).forEach(([sectionId, sectionData]) => {
-                        if (this.isValidDDCSectionId(sectionId)) {
-                            validSections[sectionId] = sectionData;
-                        } else {
-                            console.warn(`Invalid DDC section ID: ${sectionId}, skipping`);
-                        }
-                    });
-
-                    return this.buildHierarchyFromSections(validSections);
-                }
-            }
-        } catch (error) {
-            console.error('Failed to process AI response for visualization:', error);
-        }
-
-        return [];
+        // Instead of parsing AI response, build hierarchy directly from vault analysis data
+        console.log('Building domain hierarchy directly from vault analysis data for visualization');
+        return this.buildHierarchyFromVaultData(analysisData);
     }
 
     /**
@@ -1243,15 +1221,10 @@ IMPORTANT: You MUST respond with properly formatted JSON in code blocks as speci
 ${this.generateStructureAnalysisPrompt()}
 
 CRITICAL REMINDERS:
-1. Only include DDC sections that are ACTUALLY represented in the user's vault content
-2. Use the actual knowledge domains from the data (found in the "knowledgeDomain" field)
-3. Your response MUST include the full JSON structure with all required sections:
-   - knowledgeDomainDistribution with summary and sectionClassification
-   - knowledgeNetwork
-   - knowledgeGaps
-4. Provide accurate summary indicators (topDomain, bridgeMaker, growthTrend, recentFocus)
-5. Focus on accurate classification of knowledge domains to DDC sections
-6. Do NOT return a template response - analyze the actual content and provide real insights`;
+1. Notes are already classified with DDC section codes in their knowledgeDomain field
+2. Focus on providing accurate summary indicators and network analysis
+3. Your response MUST include the full JSON structure with all required sections
+4. Do NOT return a template response - analyze the actual content and provide real insights`;
 
             // Use the new tab-specific analysis method
             const response = await this.aiService.generateTabAnalysis('structure', structurePrompt);

@@ -110,3 +110,21 @@ export interface SimulationGraphLink {
     target: string | SimulationGraphNode;
 }
 
+// Domain Hierarchy Interfaces for knowledge visualization
+export interface HierarchicalDomain {
+    name: string;
+    noteCount: number;
+    avgCentrality?: number;
+    children?: HierarchicalDomain[];
+    keywords?: string[];
+    level?: number;
+    parent?: string;
+    ddcCode?: string; // DDC (Dewey Decimal Classification) code
+}
+
+export interface DomainConnection {
+    source: string;
+    target: string;
+    strength: number;
+}
+

@@ -1,15 +1,13 @@
 import { App } from 'obsidian';
-import { GraphAnalysisSettings } from '../../types/types';
+import { GraphAnalysisSettings, HierarchicalDomain, DomainConnection } from '../../types/types';
 import { 
     DomainDistributionChart, 
     DomainDistributionData,
-    HierarchicalDomain,
-    DomainData,
-    DomainConnection
+    DomainData
 } from '../../components/domain-distribution/DomainDistributionChart';
 import * as d3 from 'd3';
 
-// Note: DomainData, HierarchicalDomain, and DomainConnection are now imported from DomainDistributionChart
+// Note: HierarchicalDomain and DomainConnection are now imported from types.ts
 
 export interface NetworkNode {
     title: string;
