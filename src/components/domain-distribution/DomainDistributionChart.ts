@@ -70,13 +70,16 @@ export class DomainDistributionChart {
         // Listen for theme or accent color changes and refresh chart
         // Use multiple methods to detect theme changes
         this._themeChangeHandler = () => {
-            // Debounce rapid theme changes
+            // Debounce rapid theme changes and prevent unnecessary refreshes
             if (this._themeChangeTimeout) {
                 clearTimeout(this._themeChangeTimeout);
             }
             this._themeChangeTimeout = setTimeout(() => {
-                this.refresh();
-            }, 100);
+                // Only refresh if the chart is actually rendered
+                if (this.container.children.length > 0) {
+                    this.refresh();
+                }
+            }, 150); // Slightly longer debounce for smoother experience
         };
 
         // Method 1: Listen for CSS changes on workspace
@@ -85,36 +88,44 @@ export class DomainDistributionChart {
             workspace.addEventListener('css-change', this._themeChangeHandler);
         }
 
-                 // Method 2: Listen for theme class changes on body
-         this._themeObserver = new MutationObserver((mutations) => {
-             for (const mutation of mutations) {
-                 if (mutation.type === 'attributes' && 
-                     mutation.attributeName === 'class' &&
-                     mutation.target === document.body) {
-                     this._themeChangeHandler?.();
-                     break;
-                 }
-             }
-         });
+                         // Method 2: Listen for theme class changes on body (only theme-related changes)
+        this._themeObserver = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                if (mutation.type === 'attributes' && 
+                    mutation.attributeName === 'class' &&
+                    mutation.target === document.body) {
+                    const classList = (mutation.target as HTMLElement).className;
+                    // Only trigger on actual theme changes
+                    if (classList.includes('theme-') || classList.includes('color-scheme-')) {
+                        this._themeChangeHandler?.();
+                    }
+                    break;
+                }
+            }
+        });
         this._themeObserver.observe(document.body, {
             attributes: true,
             attributeFilter: ['class']
         });
 
-                 // Method 3: Listen for changes to the document element class/style
-         this._documentObserver = new MutationObserver((mutations) => {
-             for (const mutation of mutations) {
-                 if (mutation.type === 'attributes' && 
-                     (mutation.attributeName === 'class' || mutation.attributeName === 'style') &&
-                     mutation.target === document.documentElement) {
-                     this._themeChangeHandler?.();
-                     break;
-                 }
-             }
-         });
+        // Method 3: Listen for changes to the document element (only style changes that affect CSS variables)
+        this._documentObserver = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                if (mutation.type === 'attributes' && 
+                    mutation.attributeName === 'style' &&
+                    mutation.target === document.documentElement) {
+                    const style = (mutation.target as HTMLElement).getAttribute('style') || '';
+                    // Only trigger on style changes that might affect accent colors
+                    if (style.includes('--accent') || style.includes('--text-accent') || style.includes('--interactive-accent')) {
+                        this._themeChangeHandler?.();
+                    }
+                    break;
+                }
+            }
+        });
         this._documentObserver.observe(document.documentElement, {
             attributes: true,
-            attributeFilter: ['class', 'style']
+            attributeFilter: ['style']
         });
     }
 
@@ -153,14 +164,13 @@ export class DomainDistributionChart {
                 const structureData = JSON.parse(structureContent);
                 
                 if (structureData?.knowledgeStructure?.domainHierarchy) {
-                    console.log('Using structure-specific analysis for domain distribution chart');
                     return {
                         domainHierarchy: structureData.knowledgeStructure.domainHierarchy,
                         domainConnections: structureData.knowledgeStructure.domainConnections
                     };
                 }
             } catch (structureError) {
-                console.log('No structure-specific analysis found, will try other methods');
+                // Try other methods if structure-specific analysis not found
             }
             
             // Then try to load from the master analysis file (legacy approach)
@@ -170,14 +180,13 @@ export class DomainDistributionChart {
                 const masterData = JSON.parse(masterContent);
                 
                 if (masterData?.knowledgeStructure?.domainHierarchy) {
-                    console.log('Using master analysis for domain distribution chart');
                     return {
                         domainHierarchy: masterData.knowledgeStructure.domainHierarchy,
                         domainConnections: masterData.knowledgeStructure.domainConnections
                     };
                 }
             } catch (masterError) {
-                console.log('No master analysis found, will try building from vault analysis');
+                // Try building from vault analysis if master analysis not found
             }
             
             // Finally, try to build directly from vault analysis data (new approach)
@@ -200,11 +209,8 @@ export class DomainDistributionChart {
             const vaultData = JSON.parse(content) as VaultAnalysisData;
             
             if (!vaultData?.results || vaultData.results.length === 0) {
-                console.log('No vault analysis data found or empty results');
                 return null;
             }
-            
-            console.log(`Building domain hierarchy from ${vaultData.results.length} notes using MasterAnalysisManager`);
             
             // Ensure DDC template is loaded in MasterAnalysisManager
             await this.masterAnalysisManager.ensureDDCTemplateLoaded();
@@ -339,86 +345,9 @@ export class DomainDistributionChart {
     }
 
     private renderSunburstChart(container: HTMLElement = this.container): void {
-        // Helper function for vivid HSL color palette based on accent color
+        // Use extracted color generation method
         const getVividAccentColor = (i: number, total: number): string => {
-            // Try to get accent color from Obsidian's CSS variables
-            const accentColor = getComputedStyle(document.documentElement)
-                .getPropertyValue('--text-accent')
-                .trim();
-            
-            // If we have the accent color, use it as the base
-            if (accentColor && accentColor !== '') {
-                // Try to parse the accent color to extract HSL values
-                // First check if it's already an HSL color
-                const hslMatch = accentColor.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
-                if (hslMatch) {
-                    const hue = parseInt(hslMatch[1]);
-                    const saturation = parseInt(hslMatch[2]);
-                    const lightness = parseInt(hslMatch[3]);
-                    
-                    // Vary lightness for each section, keep saturation high for vividness
-                    const adjustedLightness = Math.max(35, Math.min(65, 
-                        lightness + (i / Math.max(1, total - 1)) * 25 - 12.5
-                    ));
-                    const adjustedSaturation = Math.max(70, saturation);
-                    
-                    return `hsl(${hue}, ${adjustedSaturation}%, ${adjustedLightness}%)`;
-                }
-                
-                // If not HSL, try to convert RGB to HSL
-                const rgbMatch = accentColor.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-                if (rgbMatch) {
-                    const r = parseInt(rgbMatch[1]) / 255;
-                    const g = parseInt(rgbMatch[2]) / 255;
-                    const b = parseInt(rgbMatch[3]) / 255;
-                    
-                    const max = Math.max(r, g, b);
-                    const min = Math.min(r, g, b);
-                    const diff = max - min;
-                    
-                    // Calculate HSL values
-                    let hue = 0;
-                    if (diff !== 0) {
-                        if (max === r) hue = ((g - b) / diff) % 6;
-                        else if (max === g) hue = (b - r) / diff + 2;
-                        else hue = (r - g) / diff + 4;
-                    }
-                    hue = Math.round(hue * 60);
-                    if (hue < 0) hue += 360;
-                    
-                    const lightness = (max + min) / 2;
-                    const saturation = diff === 0 ? 0 : diff / (1 - Math.abs(2 * lightness - 1));
-                    
-                    // Vary lightness for each section, keep saturation high for vividness
-                    const adjustedLightness = Math.max(35, Math.min(65, 
-                        lightness * 100 + (i / Math.max(1, total - 1)) * 25 - 12.5
-                    ));
-                    const adjustedSaturation = Math.max(70, saturation * 100);
-                    
-                    return `hsl(${hue}, ${adjustedSaturation}%, ${adjustedLightness}%)`;
-                }
-                
-                // If all else fails, use the accent color directly with opacity variations
-                const opacity = 0.6 + 0.4 * (i / Math.max(1, total - 1));
-                return `color-mix(in srgb, ${accentColor} ${Math.round(opacity * 100)}%, transparent)`;
-            }
-            
-            // Ultimate fallback: use a neutral color scheme that works with any theme
-            const isDarkTheme = document.body.classList.contains('theme-dark');
-            const baseHue = 220; // Blue-gray, works well in both themes
-            const baseSaturation = 30;
-            const baseLightness = isDarkTheme ? 60 : 40;
-            
-            // Vary lightness for each section
-            const adjustedLightness = Math.max(
-                isDarkTheme ? 40 : 25, 
-                Math.min(
-                    isDarkTheme ? 80 : 65, 
-                    baseLightness + (i / Math.max(1, total - 1)) * 30 - 15
-                )
-            );
-            
-            return `hsl(${baseHue}, ${baseSaturation}%, ${adjustedLightness}%)`;
+            return this.generateAccentColor(i, total);
         };
 
         // Get container dimensions for responsive sizing
@@ -436,23 +365,6 @@ export class DomainDistributionChart {
         // Prepare data - hierarchy is now pre-built by MasterAnalysisManager
         const hierarchyData = this.prepareOptimizedHierarchy();
         
-        // DETAILED DEBUGGING: Let's see what we're actually getting
-        console.log('📊 Raw domainHierarchy from MasterAnalysisManager:', this.data?.domainHierarchy);
-        console.log('📊 Prepared hierarchyData:', hierarchyData);
-        console.log('📊 HierarchyData children count:', hierarchyData.children?.length || 0);
-        
-        // Debug each level
-        if (hierarchyData.children) {
-            hierarchyData.children.forEach((child, i) => {
-                console.log(`📊 Level 1 [${i}]: ${child.name} (${child.noteCount || child.value} notes, children: ${child.children?.length || 0})`);
-                if (child.children) {
-                    child.children.forEach((grandChild, j) => {
-                        console.log(`📊   Level 2 [${i}.${j}]: ${grandChild.name} (${grandChild.noteCount || grandChild.value} notes)`);
-                    });
-                }
-            });
-        }
-        
         // Compute the layout using D3 standard approach
         const hierarchy = d3.hierarchy<D3HierarchyNode>(hierarchyData)
             .sum((d: D3HierarchyNode) => d.value || 0)
@@ -461,12 +373,6 @@ export class DomainDistributionChart {
         const root = d3.partition<D3HierarchyNode>()
             .size([2 * Math.PI, hierarchy.height + 1])
             (hierarchy);
-
-        console.log(`📊 DDC Sunburst: ${width}px, layers=${hierarchy.height}, total_nodes=${root.descendants().length}`);
-        console.log(`📊 Descendants by depth:`, root.descendants().reduce((acc: any, d: any) => {
-            acc[d.depth] = (acc[d.depth] || 0) + 1;
-            return acc;
-        }, {}));
 
         // Remove color palette generation. We'll use CSS variables for fill and filter for distinction.
 
@@ -516,7 +422,21 @@ export class DomainDistributionChart {
             .data(descendants)
             .enter().append('path')
             .attr('d', arc)
-            .attr('fill', (d: any) => {
+            .attr('data-index', (d: any) => {
+                // Store the color index for in-place updates
+                let topIndex = 0;
+                let ancestor = d;
+                while (ancestor.depth > 1) ancestor = ancestor.parent;
+                if (ancestor.parent) {
+                    topIndex = ancestor.parent.children.indexOf(ancestor);
+                } else if (ancestor.depth === 1 && ancestor.parent) {
+                    topIndex = ancestor.parent.children.indexOf(ancestor);
+                } else if (ancestor.depth === 1) {
+                    topIndex = descendants.filter(x => x.depth === 1).indexOf(ancestor);
+                }
+                return topIndex;
+            })
+            .attr('fill', (d: any, i: number) => {
                 // Use vivid accent color for top-level sections, inherit for children
                 let topIndex = 0;
                 let ancestor = d;
@@ -528,15 +448,14 @@ export class DomainDistributionChart {
                 } else if (ancestor.depth === 1) {
                     topIndex = descendants.filter(x => x.depth === 1).indexOf(ancestor);
                 }
-                const total = totalTopLevel;
-                return getVividAccentColor(topIndex, total);
+                return getVividAccentColor(topIndex, totalTopLevel);
             })
-            .attr('fill-opacity', (d: any) => arcVisible(d) ? (d.children ? 0.6 : 0.4) : 0)
+            .attr('fill-opacity', (d: any) => arcVisible(d) ? (d.children ? 0.8 : 0.9) : 0)
             .attr('stroke', 'var(--background-primary)')
             .attr('stroke-width', 1)
             .attr('pointer-events', (d: any) => arcVisible(d) ? 'auto' : 'none')
             .style('cursor', 'default')
-            .style('transition', 'opacity 0.2s ease, filter 0.2s ease');
+            .style('transition', 'fill 0.3s ease, opacity 0.2s ease, filter 0.2s ease');
 
         // Add tooltips to paths
         const format = d3.format(',d');
@@ -921,8 +840,68 @@ export class DomainDistributionChart {
         this.settings = settings;
     }
 
+
+
     public async refresh(): Promise<void> {
+        // Try to update colors in-place first (faster, no blink)
+        if (this.updateColorsInPlace()) {
+            return;
+        }
+        
+        // Fall back to full re-render if in-place update isn't possible
+        this.container.empty();
         this.data = null;
         await this.render();
+    }
+
+    private updateColorsInPlace(): boolean {
+        // Check if we have an existing SVG to update
+        const svg = this.container.querySelector('.domain-sunburst-chart');
+        if (!svg || !this.data?.domainHierarchy) {
+            return false;
+        }
+
+        try {
+            // Update path colors without full re-render
+            const paths = svg.querySelectorAll('path');
+            const totalTopLevel = this.data.domainHierarchy.length;
+            
+            paths.forEach((path, index) => {
+                const pathElement = path as SVGPathElement;
+                const dataIndex = parseInt(pathElement.getAttribute('data-index') || '0');
+                const newColor = this.generateAccentColor(dataIndex, totalTopLevel);
+                
+                // Apply color with smooth transition
+                pathElement.style.transition = 'fill 0.3s ease';
+                pathElement.style.fill = newColor;
+            });
+
+            // Update center circle background
+            const centerCircle = svg.querySelector('circle');
+            if (centerCircle) {
+                (centerCircle as SVGCircleElement).style.transition = 'fill 0.3s ease, stroke 0.3s ease';
+                (centerCircle as SVGCircleElement).setAttribute('fill', 'var(--chart-background, var(--background-secondary))');
+            }
+
+            return true;
+        } catch (error) {
+            // If in-place update fails, fall back to full re-render
+            return false;
+        }
+    }
+
+    // Extract color generation logic for reuse
+    private generateAccentColor(i: number, total: number): string {
+        if (total <= 1) {
+            return `var(--text-accent)`;
+        } else if (total <= 3) {
+            const opacity = 0.5 + 0.5 * (i / (total - 1));
+            return `color-mix(in srgb, var(--text-accent) ${Math.round(opacity * 100)}%, transparent)`;
+        } else {
+            const mixRatio = 60 + 30 * (i / (total - 1));
+            const mixIndex = i % 4;
+            const mixColors = ['var(--background-secondary)', 'var(--text-muted)', 'var(--background-modifier-border)', 'var(--background-primary-alt)'];
+            return `color-mix(in srgb, var(--text-accent) ${Math.round(mixRatio)}%, ${mixColors[mixIndex]})`;
+        }
     }
 }

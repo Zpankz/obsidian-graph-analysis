@@ -329,7 +329,7 @@
 
 /* Theme consistency and responsiveness */
 .domain-sunburst-chart path {
-    transition: fill 0.3s ease, opacity 0.2s ease, filter 0.2s ease;
+    transition: fill 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease, filter 0.2s ease;
 }
 
 .theme-dark .domain-sunburst-chart path {
