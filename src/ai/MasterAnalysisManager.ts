@@ -1,5 +1,5 @@
 import { App } from 'obsidian';
-import { GraphAnalysisSettings, HierarchicalDomain, DomainConnection } from '../types/types';
+import { GraphAnalysisSettings, HierarchicalDomain } from '../types/types';
 import { KnowledgeStructureData } from './visualization/KnowledgeStructureManager';
 import { 
     KnowledgeEvolutionData,
@@ -202,7 +202,7 @@ export class MasterAnalysisManager {
             
             if (this.ddcTemplate?.ddc_23_summaries?.classes) {
                 const classCount = this.ddcTemplate.ddc_23_summaries.classes.length;
-                console.log(`Processing ${classCount} DDC classes`);
+                // console.log(`Processing ${classCount} DDC classes`);
                 
                 this.ddcTemplate.ddc_23_summaries.classes.forEach(ddcClass => {
                     // Store main class
@@ -210,14 +210,14 @@ export class MasterAnalysisManager {
                     
                     // Process divisions
                     const divisionCount = ddcClass.divisions.length;
-                    console.log(`Processing ${divisionCount} divisions for class ${ddcClass.id} (${ddcClass.name})`);
+                    // console.log(`Processing ${divisionCount} divisions for class ${ddcClass.id} (${ddcClass.name})`);
                     
                     ddcClass.divisions.forEach(division => {
                         this.ddcDivisions[division.id] = division.name;
                         
                         // Process sections and build optimized list
                         const sectionCount = division.sections.length;
-                        console.log(`Processing ${sectionCount} sections for division ${division.id} (${division.name})`);
+                        // console.log(`Processing ${sectionCount} sections for division ${division.id} (${division.name})`);
                         
                         division.sections.forEach(section => {
                             this.ddcSections[section.id] = section.name;
@@ -543,18 +543,18 @@ export class MasterAnalysisManager {
         return result;
     }
     
-    /**
-     * Simple string hash function for creating synthetic IDs
-     */
-    private hashString(str: string): number {
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) {
-            const char = str.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash; // Convert to 32bit integer
-        }
-        return Math.abs(hash);
-    }
+    // /**
+    //  * Simple string hash function for creating synthetic IDs
+    //  */
+    // private hashString(str: string): number {
+    //     let hash = 0;
+    //     for (let i = 0; i < str.length; i++) {
+    //         const char = str.charCodeAt(i);
+    //         hash = ((hash << 5) - hash) + char;
+    //         hash = hash & hash; // Convert to 32bit integer
+    //     }
+    //     return Math.abs(hash);
+    // }
 
     /**
      * Helper methods to extract IDs from section IDs - UPDATED for new structured ID system
@@ -1174,7 +1174,6 @@ VAULT ANALYSIS DATA:
 ${chunks[i]}`;
                 }
 
-                console.log(`Processing chunk ${i+1}/${chunks.length}...`);
                 const response = await this.aiService.storeDataChunk(contextPrompt, i + 1, chunks.length);
                 
                 // Add delays between chunks for rate limiting (only needed for multiple chunks)
