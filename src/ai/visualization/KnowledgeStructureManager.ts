@@ -4,7 +4,8 @@ import {
     DomainDistributionChart, 
     DomainDistributionData
 } from '../../components/domain-distribution/DomainDistributionChart';
-import * as d3 from 'd3';
+import { MasterAnalysisManager } from '../MasterAnalysisManager';
+
 
 export interface NetworkNode {
     domain: string;
@@ -25,12 +26,6 @@ export interface NetworkNode {
 }
 
 export interface KnowledgeStructureData {
-    // Hierarchical domain structure for sunburst visualization (2 layers: Main Classes, Sections)
-    domainHierarchy: HierarchicalDomain[];
-    
-    // Cross-domain connections - optional
-    domainConnections?: DomainConnection[];
-    
     // Network analysis
     knowledgeNetwork: {
         bridges: NetworkNode[];
@@ -38,12 +33,7 @@ export interface KnowledgeStructureData {
         authorities: NetworkNode[];
     };
     
-    // Insights and gaps
-    insights: Array<{
-        title: string;
-        content: string;
-        keyPoints: string[];
-    }>;
+    // Knowledge gaps
     gaps: string[];
 }
 
@@ -52,10 +42,47 @@ export class KnowledgeStructureManager {
     private settings: GraphAnalysisSettings;
     private container: HTMLElement;
     private data: KnowledgeStructureData | null = null;
+    private domainHierarchy: HierarchicalDomain[] | null = null;
+    private domainConnections: DomainConnection[] | null = null;
+    private createEmptyStateFn: (container: HTMLElement, message: string) => void;
 
-    constructor(app: App, settings: GraphAnalysisSettings) {
+    constructor(app: App, settings: GraphAnalysisSettings, createEmptyStateFn?: (container: HTMLElement, message: string) => void) {
         this.app = app;
         this.settings = settings;
+        this.createEmptyStateFn = createEmptyStateFn || this.defaultCreateEmptyState.bind(this);
+    }
+
+    /**
+     * Default empty state implementation for when no callback is provided
+     */
+    private defaultCreateEmptyState(container: HTMLElement, message: string): void {
+        const emptyState = document.createElement('div');
+        emptyState.className = 'network-empty-state';
+        emptyState.style.textAlign = 'center';
+        emptyState.style.padding = '40px 20px';
+        emptyState.style.background = 'var(--background-secondary-alt)';
+        emptyState.style.borderRadius = '12px';
+        emptyState.style.border = '1px dashed var(--background-modifier-border)';
+        container.appendChild(emptyState);
+        
+        const iconEl = document.createElement('div');
+        iconEl.className = 'network-empty-state-icon';
+        iconEl.style.marginBottom = '16px';
+        iconEl.style.display = 'flex';
+        iconEl.style.justifyContent = 'center';
+        iconEl.style.alignItems = 'center';
+        emptyState.appendChild(iconEl);
+        
+        // Add Lucide chart icon
+        setIcon(iconEl, 'bar-chart-2');
+        
+        const textEl = document.createElement('p');
+        textEl.className = 'network-empty-state-text';
+        textEl.textContent = message;
+        textEl.style.color = 'var(--text-muted)';
+        textEl.style.fontSize = '14px';
+        textEl.style.lineHeight = '1.5';
+        emptyState.appendChild(textEl);
     }
 
     public async loadCachedStructureData(): Promise<KnowledgeStructureData | null> {
@@ -84,12 +111,30 @@ export class KnowledgeStructureManager {
             await this.loadCachedStructureData();
         }
 
-        if (!this.data) {
-            this.renderPlaceholder();
-            return;
+        // Load domain hierarchy if not already loaded
+        if (!this.domainHierarchy || this.domainHierarchy.length === 0) {
+            try {
+                // Load domain hierarchy from vault-analysis.json
+                const filePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/vault-analysis.json`;
+                const content = await this.app.vault.adapter.read(filePath);
+                const vaultAnalysisData = JSON.parse(content);
+                
+                if (vaultAnalysisData && vaultAnalysisData.results) {
+                    // Create a new MasterAnalysisManager instance
+                    const masterAnalysisManager = new MasterAnalysisManager(this.app, this.settings);
+                    
+                    // Ensure DDC template is loaded
+                    await masterAnalysisManager.ensureDDCTemplateLoaded();
+                    
+                    // Build hierarchy
+                    this.domainHierarchy = masterAnalysisManager.buildHierarchyFromVaultData(vaultAnalysisData);
+                }
+            } catch (error) {
+                console.error('Failed to load domain hierarchy:', error);
+            }
         }
 
-        // Create the three main sections
+        // Always create the three main sections - they will handle their own empty states
         await this.createKnowledgeDomainDistributionSection();
         await this.createKnowledgeNetworkAnalysisSection();
         await this.createKnowledgeGapSection();
@@ -167,14 +212,8 @@ export class KnowledgeStructureManager {
         });
 
         // Check if we have hierarchical data
-        if (!this.data!.domainHierarchy || this.data!.domainHierarchy.length === 0) {
-            const placeholder = section.createEl('div', { 
-                cls: 'vault-analysis-placeholder' 
-            });
-            placeholder.createEl('p', {
-                text: 'No DDC hierarchy data available. Please generate vault analysis with hierarchical domain structure.',
-                cls: 'analysis-required'
-            });
+        if (!this.domainHierarchy || this.domainHierarchy.length === 0) {
+            this.createEmptyStateFn(section, 'Generate vault analysis to see your knowledge domain distribution.');
             return;
         }
 
@@ -185,8 +224,8 @@ export class KnowledgeStructureManager {
         
         // Prepare data for the domain distribution component
         const domainDistributionData: DomainDistributionData = {
-            domainHierarchy: this.data!.domainHierarchy,
-            domainConnections: this.data!.domainConnections
+            domainHierarchy: this.domainHierarchy,
+            domainConnections: this.domainConnections || []
         };
         
         // Create and render the domain distribution chart
@@ -219,11 +258,11 @@ export class KnowledgeStructureManager {
             cls: 'vault-analysis-section-title'
         });
 
-        const networkData = this.data!.knowledgeNetwork;
+        const networkData = this.data?.knowledgeNetwork;
 
         // Check if we have any network data
         if (!networkData || (!networkData.bridges?.length && !networkData.foundations?.length && !networkData.authorities?.length)) {
-            this.createEmptyState(section, 'Network analysis requires graph metrics to be calculated. Run centrality analysis first to see network insights.');
+            this.createEmptyStateFn(section, 'Generate AI analysis to identify knowledge bridges, foundations, and authorities in your vault\'s network structure.');
             return;
         }
 
@@ -498,38 +537,7 @@ export class KnowledgeStructureManager {
         });
     }
 
-    /**
-     * Create an empty state with icon and message
-     */
-    private createEmptyState(container: HTMLElement, message: string): void {
-        const emptyState = document.createElement('div');
-        emptyState.className = 'network-empty-state';
-        emptyState.style.textAlign = 'center';
-        emptyState.style.padding = '40px 20px';
-        emptyState.style.background = 'var(--background-secondary-alt)';
-        emptyState.style.borderRadius = '12px';
-        emptyState.style.border = '1px dashed var(--background-modifier-border)';
-        container.appendChild(emptyState);
-        
-        const iconEl = document.createElement('div');
-        iconEl.className = 'network-empty-state-icon';
-        iconEl.style.marginBottom = '16px';
-        iconEl.style.display = 'flex';
-        iconEl.style.justifyContent = 'center';
-        iconEl.style.alignItems = 'center';
-        emptyState.appendChild(iconEl);
-        
-        // Add Lucide chart icon
-        setIcon(iconEl, 'bar-chart-2');
-        
-        const textEl = document.createElement('p');
-        textEl.className = 'network-empty-state-text';
-        textEl.textContent = message;
-        textEl.style.color = 'var(--text-muted)';
-        textEl.style.fontSize = '14px';
-        textEl.style.lineHeight = '1.5';
-        emptyState.appendChild(textEl);
-    }
+
 
     /**
      * Section 3: Knowledge Gap Analysis
@@ -544,7 +552,7 @@ export class KnowledgeStructureManager {
             cls: 'vault-analysis-section-title'
         });
 
-        if (this.data!.gaps && this.data!.gaps.length > 0) {
+        if (this.data?.gaps && this.data.gaps.length > 0) {
             const gapsContainer = section.createEl('div', { 
                 cls: 'ai-insights-container'
             });
@@ -558,26 +566,12 @@ export class KnowledgeStructureManager {
                 cls: 'gaps-list' 
             });
 
-            this.data!.gaps.slice(0, 8).forEach(gap => {
+            this.data.gaps.slice(0, 8).forEach(gap => {
                 gapsList.createEl('li', { text: gap });
             });
         } else {
-            this.createEmptyGapsState(section);
+            this.createEmptyStateFn(section, 'Generate AI analysis to identify potential knowledge gaps and areas for expansion in your vault.');
         }
-    }
-
-    /**
-     * Helper method for empty gaps state
-     */
-    private createEmptyGapsState(section: HTMLElement): void {
-        const emptyState = section.createEl('div', { 
-            cls: 'vault-analysis-placeholder' 
-        });
-        
-        emptyState.createEl('p', {
-            text: 'No knowledge gaps identified in the current analysis. Your knowledge coverage appears comprehensive!',
-            cls: 'analysis-required'
-        });
     }
 
     public updateSettings(settings: GraphAnalysisSettings): void {
@@ -588,8 +582,19 @@ export class KnowledgeStructureManager {
         this.data = data;
     }
 
-    public async renderWithData(container: HTMLElement, data: KnowledgeStructureData): Promise<void> {
+    public setDomainHierarchy(hierarchy: HierarchicalDomain[]): void {
+        this.domainHierarchy = hierarchy;
+    }
+
+    public setDomainConnections(connections: DomainConnection[]): void {
+        this.domainConnections = connections;
+    }
+
+    public async renderWithData(container: HTMLElement, data: KnowledgeStructureData, domainHierarchy?: HierarchicalDomain[]): Promise<void> {
         this.data = data;
+        if (domainHierarchy) {
+            this.domainHierarchy = domainHierarchy;
+        }
         await this.renderStructureAnalysis(container);
     }
 
@@ -611,7 +616,7 @@ export class KnowledgeStructureManager {
         container.empty();
         
         if (!this.data) {
-            this.createEmptyState(container, 'Network analysis requires graph metrics to be calculated. Run centrality analysis first to see network insights.');
+            this.createEmptyStateFn(container, 'Generate AI analysis to identify knowledge bridges, foundations, and authorities in your vault\'s network structure.');
             return;
         }
 

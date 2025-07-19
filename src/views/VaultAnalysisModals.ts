@@ -537,7 +537,7 @@ export class VaultAnalysisModal extends Modal {
         
         // Use the KnowledgeStructureManager to render the network analysis
         if (!this.knowledgeStructureManager) {
-            this.knowledgeStructureManager = new KnowledgeStructureManager(this.app, this.settings);
+            this.knowledgeStructureManager = new KnowledgeStructureManager(this.app, this.settings, this.createEmptyState.bind(this));
         }
         
         // Render the network analysis using the visualization manager
@@ -716,37 +716,59 @@ export class VaultAnalysisModal extends Modal {
     }
     
     /**
+     * Create a consistent empty state with icon and message for all analysis tabs
+     * Public method to be used by all knowledge analysis components
+     */
+    public createEmptyState(container: HTMLElement, message: string): void {
+        const emptyState = document.createElement('div');
+        emptyState.className = 'network-empty-state';
+        emptyState.style.textAlign = 'center';
+        emptyState.style.padding = '40px 20px';
+        emptyState.style.background = 'var(--background-secondary-alt)';
+        emptyState.style.borderRadius = '12px';
+        emptyState.style.border = '1px dashed var(--background-modifier-border)';
+        container.appendChild(emptyState);
+        
+        const iconEl = document.createElement('div');
+        iconEl.className = 'network-empty-state-icon';
+        iconEl.style.marginBottom = '16px';
+        iconEl.style.display = 'flex';
+        iconEl.style.justifyContent = 'center';
+        iconEl.style.alignItems = 'center';
+        emptyState.appendChild(iconEl);
+        
+        // Add Lucide chart icon
+        setIcon(iconEl, 'bar-chart-2');
+        
+        const textEl = document.createElement('p');
+        textEl.className = 'network-empty-state-text';
+        textEl.textContent = message;
+        textEl.style.color = 'var(--text-muted)';
+        textEl.style.fontSize = '14px';
+        textEl.style.lineHeight = '1.5';
+        emptyState.appendChild(textEl);
+    }
+
+    /**
      * Show placeholder for network analysis section
+     * Uses the centralized empty state method
      */
     private showNetworkAnalysisPlaceholder(container: HTMLElement): void {
-        const placeholder = container.createEl('div', { cls: 'network-empty-state' });
-        
-        placeholder.createEl('div', {
-            cls: 'network-empty-state-icon',
-            text: '🔍'
-        });
-        
-        placeholder.createEl('p', {
-            cls: 'network-empty-state-text',
-            text: 'Generate AI analysis to discover bridge notes, foundation notes, and authority notes in your knowledge network.'
-        });
+        this.createEmptyState(
+            container, 
+            'Generate AI analysis to identify knowledge bridges, foundations, and authorities in your vault\'s network structure.'
+        );
     }
     
     /**
      * Show placeholder for knowledge gaps section
+     * Uses the centralized empty state method
      */
     private showKnowledgeGapsPlaceholder(container: HTMLElement): void {
-        const placeholder = container.createEl('div', { cls: 'network-empty-state' });
-        
-        placeholder.createEl('div', {
-            cls: 'network-empty-state-icon',
-            text: '🎯'
-        });
-        
-        placeholder.createEl('p', {
-            cls: 'network-empty-state-text',
-            text: 'Generate AI analysis to identify potential knowledge gaps and areas for expansion in your vault.'
-        });
+        this.createEmptyState(
+            container, 
+            'Generate AI analysis to identify potential knowledge gaps and areas for expansion in your vault.'
+        );
     }
 
     private showStructureEmptyState(container: HTMLElement): void {

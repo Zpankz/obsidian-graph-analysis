@@ -90,10 +90,46 @@ export class KnowledgeEvolutionManager {
     private container: HTMLElement;
     private data: KnowledgeEvolutionData | null = null;
     private calendarChart: KnowledgeCalendarChart | null = null;
+    private createEmptyStateFn: (container: HTMLElement, message: string) => void;
 
-    constructor(app: App, settings: GraphAnalysisSettings) {
+    constructor(app: App, settings: GraphAnalysisSettings, createEmptyStateFn?: (container: HTMLElement, message: string) => void) {
         this.app = app;
         this.settings = settings;
+        this.createEmptyStateFn = createEmptyStateFn || this.defaultCreateEmptyState.bind(this);
+    }
+
+    /**
+     * Default empty state implementation for when no callback is provided
+     */
+    private defaultCreateEmptyState(container: HTMLElement, message: string): void {
+        const emptyState = document.createElement('div');
+        emptyState.className = 'network-empty-state';
+        emptyState.style.textAlign = 'center';
+        emptyState.style.padding = '40px 20px';
+        emptyState.style.background = 'var(--background-secondary-alt)';
+        emptyState.style.borderRadius = '12px';
+        emptyState.style.border = '1px dashed var(--background-modifier-border)';
+        container.appendChild(emptyState);
+        
+        const iconEl = document.createElement('div');
+        iconEl.className = 'network-empty-state-icon';
+        iconEl.style.marginBottom = '16px';
+        iconEl.style.display = 'flex';
+        iconEl.style.justifyContent = 'center';
+        iconEl.style.alignItems = 'center';
+        emptyState.appendChild(iconEl);
+        
+        // Add Lucide chart icon (need to import setIcon)
+        // setIcon(iconEl, 'bar-chart-2');
+        iconEl.innerHTML = '📊'; // Fallback emoji icon
+        
+        const textEl = document.createElement('p');
+        textEl.className = 'network-empty-state-text';
+        textEl.textContent = message;
+        textEl.style.color = 'var(--text-muted)';
+        textEl.style.fontSize = '14px';
+        textEl.style.lineHeight = '1.5';
+        emptyState.appendChild(textEl);
     }
 
     public async loadCachedEvolutionData(): Promise<KnowledgeEvolutionData | null> {
@@ -124,7 +160,7 @@ export class KnowledgeEvolutionManager {
         }
 
         if (!this.data) {
-            this.renderPlaceholder();
+            this.createEmptyStateFn(this.container, 'Generate AI analysis to see your knowledge evolution insights and patterns over time.');
             return;
         }
 

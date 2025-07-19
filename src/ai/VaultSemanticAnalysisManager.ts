@@ -913,6 +913,9 @@ export class VaultSemanticAnalysisManager {
             await this.app.vault.adapter.write(filePath, JSON.stringify(outputData, null, 2));
             
             console.log(`Vault analysis results saved to plugin data folder: ${filePath}`);
+            
+            // Create initial structure-analysis.json file with domain hierarchy
+            await this.masterAnalysisManager.createInitialStructureAnalysis();
         } catch (error) {
             console.error('Failed to save analysis results:', error);
             throw new Error(`Failed to save results: ${(error as Error).message}`);

@@ -1,6 +1,7 @@
-import { App } from 'obsidian';
-import { GraphAnalysisSettings, HierarchicalDomain } from '../types/types';
-import { KnowledgeStructureData } from './visualization/KnowledgeStructureManager';
+import { App, Notice, TFile } from 'obsidian';
+import { GraphAnalysisSettings, HierarchicalDomain, DomainConnection } from '../types/types';
+import { AIModelService, TokenUsage } from '../services/AIModelService';
+import { KnowledgeStructureData, NetworkNode } from './visualization/KnowledgeStructureManager';
 import { 
     KnowledgeEvolutionData,
     TimelineAnalysis,
@@ -10,7 +11,6 @@ import {
     EvolutionInsight
 } from './visualization/KnowledgeEvolutionManager';
 import { KnowledgeActionsData } from './visualization/KnowledgeActionsManager';
-import { AIModelService, TokenUsage } from '../services/AIModelService';
 
 // Remove re-export since we now import directly from types.ts
 
@@ -73,7 +73,6 @@ export interface TabAnalysisData {
     sourceAnalysisId: string;
     apiProvider: string;
     tokenUsage: TokenUsage;
-    rawAIResponse: string;
 }
 
 // NEW: Interface for knowledge structure tab analysis
@@ -370,16 +369,8 @@ export class MasterAnalysisManager {
             // Extract knowledge gaps
             const knowledgeGaps = parsedJson.knowledgeGaps || [];
             
-            // Build hierarchical domain structure directly from vault analysis data
-            const domainHierarchy = this.buildHierarchyFromVaultData(analysisData);
-            
-            // Create insights from the network analysis
-            const insights = this.generateNetworkInsights(knowledgeNetwork, domainHierarchy);
-            
             return {
-                domainHierarchy,
                 knowledgeNetwork,
-                insights,
                 gaps: knowledgeGaps
             };
         } catch (error) {
@@ -735,7 +726,7 @@ The input vault-analysis.json data contains:
 
 ## Expected Output Format
 You MUST output a JSON object with the following structure:
-\`\`\`json
+\`\`\`
 {
   "knowledgeNetwork": {
     "bridges": [
@@ -1263,6 +1254,14 @@ ${chunks[i]}`;
                 await this.loadAnalysisContext(analysisData);
             }
             
+            // Load existing structure analysis data if available
+            let existingStructureData: StructureAnalysisData | null = null;
+            try {
+                existingStructureData = await this.loadCachedTabAnalysis('structure') as StructureAnalysisData;
+            } catch (error) {
+                console.log('No existing structure analysis found, will create new one');
+            }
+            
             // Generate structure-specific analysis
             const structurePrompt = `Using the vault analysis data I provided earlier, generate a focused analysis for the Knowledge Structure tab following these exact instructions:
 
@@ -1288,7 +1287,6 @@ CRITICAL REMINDERS:
                 sourceAnalysisId: this.generateAnalysisId(analysisData),
                 apiProvider: 'Google Gemini',
                 tokenUsage: response.tokenUsage || { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 },
-                rawAIResponse: response.result,
                 knowledgeStructure: structureData
             };
             
@@ -1338,7 +1336,6 @@ CRITICAL: Your response MUST include all required JSON objects in code blocks ex
                 sourceAnalysisId: this.generateAnalysisId(analysisData),
                 apiProvider: 'Google Gemini',
                 tokenUsage: response.tokenUsage || { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 },
-                rawAIResponse: response.result,
                 knowledgeEvolution: evolutionData
             };
             
@@ -1388,7 +1385,6 @@ CRITICAL: Your response MUST include all required JSON objects in code blocks ex
                 sourceAnalysisId: this.generateAnalysisId(analysisData),
                 apiProvider: 'Google Gemini',
                 tokenUsage: response.tokenUsage || { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 },
-                rawAIResponse: response.result,
                 recommendedActions: actionsData
             };
             
@@ -1464,6 +1460,49 @@ CRITICAL: Your response MUST include all required JSON objects in code blocks ex
         } catch (error) {
             console.error('Failed to load DDC template:', error);
             return false;
+        }
+    }
+
+    /**
+     * Create initial structure-analysis.json file with empty knowledgeNetwork and knowledgeGaps
+     */
+    public async createInitialStructureAnalysis(): Promise<StructureAnalysisData | null> {
+        try {
+            console.log('Creating initial Knowledge Structure Analysis...');
+            
+            const analysisData = await this.loadVaultAnalysisData();
+            if (!analysisData) {
+                console.warn('No vault analysis data found. Cannot create initial structure analysis.');
+                return null;
+            }
+            
+            // Create empty structure data
+            const structureData: KnowledgeStructureData = {
+                knowledgeNetwork: {
+                    bridges: [],
+                    foundations: [],
+                    authorities: []
+                },
+                gaps: []
+            };
+            
+            // Create structured analysis data
+            const tabData: StructureAnalysisData = {
+                generatedAt: new Date().toISOString(),
+                sourceAnalysisId: this.generateAnalysisId(analysisData),
+                apiProvider: 'Google Gemini',
+                tokenUsage: { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 },
+                knowledgeStructure: structureData
+            };
+            
+            // Cache the results
+            await this.cacheTabAnalysis('structure', tabData);
+            
+            console.log('Initial structure analysis created successfully');
+            return tabData;
+        } catch (error) {
+            console.error('Failed to create initial Knowledge Structure Analysis:', error);
+            return null;
         }
     }
 }
