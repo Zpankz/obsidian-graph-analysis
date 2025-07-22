@@ -119,7 +119,6 @@ export class MasterAnalysisManager {
     private app: App;
     private settings: GraphAnalysisSettings;
     private aiService: AIModelService;
-    private readonly MAX_CHUNK_SIZE = 600000; // Increased chunk size to take advantage of 1M TPM limit
     
     // DDC data loaded from external JSON file - UPDATED for new structure
     private ddcTemplate: DDCTemplate | null = null;
@@ -129,9 +128,6 @@ export class MasterAnalysisManager {
     
     // NEW: Optimized section list for AI classification
     private ddcSectionsList: Array<{id: string, name: string, division: string, mainClass: string}> = [];
-    
-    // NEW: Track if context has been loaded to avoid redundant loading
-    private contextLoaded: boolean = false;
 
     constructor(app: App, settings: GraphAnalysisSettings) {
         this.app = app;
@@ -145,7 +141,6 @@ export class MasterAnalysisManager {
     public getAllDDCSections(): Array<{id: string, name: string, division: string, mainClass: string}> {
         return this.ddcSectionsList;
     }
-
 
     /**
      * Load DDC template from external JSON file and extract optimized section list
@@ -168,20 +163,7 @@ export class MasterAnalysisManager {
                 console.log(`Successfully loaded DDC template from: ${templatePath}`);
             } catch (pathError) {
                 console.log(`DDC template not found at: ${templatePath}`);
-                
-                // Try to copy from source as fallback
-                const copied = await this.copyDDCTemplateFile();
-                if (copied) {
-                    // Try loading again after copy
-                    try {
-                        ddcContent = await this.app.vault.adapter.read(templatePath);
-                        console.log(`Successfully loaded DDC template after copying to: ${templatePath}`);
-                    } catch (retryError) {
-                        throw new Error('Failed to load DDC template even after copying it. Please ensure the plugin is installed correctly.');
-                    }
-                } else {
-                    throw new Error('DDC template not found in the plugin directory and copy attempt failed. Please ensure the DDC-template.json file is properly copied to the plugin directory during installation.');
-                }
+                throw new Error('DDC template not found in the plugin directory. Please ensure the DDC-template.json file is properly copied to the plugin directory during installation.');
             }
             
             try {
@@ -201,7 +183,6 @@ export class MasterAnalysisManager {
             
             if (this.ddcTemplate?.ddc_23_summaries?.classes) {
                 const classCount = this.ddcTemplate.ddc_23_summaries.classes.length;
-                // console.log(`Processing ${classCount} DDC classes`);
                 
                 this.ddcTemplate.ddc_23_summaries.classes.forEach(ddcClass => {
                     // Store main class
@@ -209,14 +190,12 @@ export class MasterAnalysisManager {
                     
                     // Process divisions
                     const divisionCount = ddcClass.divisions.length;
-                    // console.log(`Processing ${divisionCount} divisions for class ${ddcClass.id} (${ddcClass.name})`);
                     
                     ddcClass.divisions.forEach(division => {
                         this.ddcDivisions[division.id] = division.name;
                         
                         // Process sections and build optimized list
                         const sectionCount = division.sections.length;
-                        // console.log(`Processing ${sectionCount} sections for division ${division.id} (${division.name})`);
                         
                         division.sections.forEach(section => {
                             this.ddcSections[section.id] = section.name;
@@ -308,118 +287,67 @@ export class MasterAnalysisManager {
         return `${analysisData.generatedAt}_${analysisData.totalFiles}`;
     }
 
-    // Remove cacheMasterAnalysis as we're no longer using the master cache file
-
     /**
-     * Split JSON data into larger, more efficient chunks for 2.0 Flash-Lite
+     * Validate that network node data contains real notes from the vault
      */
-    private chunkJsonData(jsonData: string): string[] {
-        const chunks: string[] = [];
-        let currentIndex = 0;
+    private validateNetworkNodeData(knowledgeNetwork: any, analysisData: VaultAnalysisData): void {
+        const vaultNotes = new Map(analysisData.results.map(note => [note.path, note]));
+        const vaultTitles = new Set(analysisData.results.map(note => note.title));
         
-        // Use larger chunk size to minimize API calls
-        const chunkSize = this.MAX_CHUNK_SIZE;
+        const categories = ['bridges', 'foundations', 'authorities'];
+        let issuesFound = 0;
         
-        while (currentIndex < jsonData.length) {
-            const chunkEnd = Math.min(currentIndex + chunkSize, jsonData.length);
-            let chunk = jsonData.substring(currentIndex, chunkEnd);
-            
-            // Try to break at a logical point to maintain JSON structure
-            if (chunkEnd < jsonData.length) {
-                const lastBrace = chunk.lastIndexOf('}');
-                const lastBracket = chunk.lastIndexOf(']');
-                const lastComma = chunk.lastIndexOf(',');
-                
-                const breakPoint = Math.max(lastBrace, lastBracket, lastComma);
-                if (breakPoint > chunk.length * 0.6) { // More flexible breaking point
-                    chunk = chunk.substring(0, breakPoint + 1);
-                    currentIndex += breakPoint + 1;
-                } else {
-                    currentIndex = chunkEnd;
-                }
-            } else {
-                currentIndex = chunkEnd;
+        categories.forEach(category => {
+            if (knowledgeNetwork[category] && Array.isArray(knowledgeNetwork[category])) {
+                knowledgeNetwork[category].forEach((domain: any, domainIndex: number) => {
+                    if (domain.topNotes && Array.isArray(domain.topNotes)) {
+                        domain.topNotes.forEach((note: any, noteIndex: number) => {
+                            // Check for dummy/example data
+                            if (note.title === 'Note Title' || 
+                                note.path === 'path/to/note.md' ||
+                                note.title?.includes('Example') ||
+                                note.title?.includes('Sample')) {
+                                console.warn(`⚠️  Dummy note detected in ${category}[${domainIndex}].topNotes[${noteIndex}]: "${note.title}"`);
+                                issuesFound++;
+                                return;
+                            }
+                            
+                            // Validate note exists in vault
+                            if (!vaultNotes.has(note.path)) {
+                                console.warn(`⚠️  Note path not found in vault: "${note.path}" (title: "${note.title}")`);
+                                
+                                // Try to find by title
+                                if (vaultTitles.has(note.title)) {
+                                    const matchingNote = analysisData.results.find(n => n.title === note.title);
+                                    if (matchingNote) {
+                                        console.log(`✅ Found note by title, correcting path: "${note.path}" → "${matchingNote.path}"`);
+                                        note.path = matchingNote.path;
+                                    }
+                                } else {
+                                    console.warn(`❌ Note title also not found in vault: "${note.title}"`);
+                                    issuesFound++;
+                                }
+                            } else {
+                                // Validate title matches path
+                                const vaultNote = vaultNotes.get(note.path);
+                                if (vaultNote && vaultNote.title !== note.title) {
+                                    console.warn(`⚠️  Title mismatch for path "${note.path}": AI says "${note.title}", vault has "${vaultNote.title}"`);
+                                    // Correct the title
+                                    note.title = vaultNote.title;
+                                }
+                            }
+                        });
+                    }
+                });
             }
-            
-            chunks.push(chunk);
-        }
-        
-        console.log(`Split into ${chunks.length} chunks`);
-        return chunks;
-    }
-
-    private parseKnowledgeStructure(section: string, analysisData: VaultAnalysisData): KnowledgeStructureData {
-        try {
-            // Extract JSON from the section
-            const jsonMatch = section.match(/```json\s*([\s\S]*?)\s*```/);
-            if (!jsonMatch) {
-                throw new Error('No JSON found in the knowledge structure section');
-            }
-            
-            const jsonStr = jsonMatch[1];
-            const parsedJson = JSON.parse(jsonStr);
-            
-            // Extract knowledge network data - this is our main focus now
-            const knowledgeNetwork = parsedJson.knowledgeNetwork || {
-                bridges: [],
-                foundations: [],
-                authorities: []
-            };
-            
-            // Extract knowledge gaps
-            const knowledgeGaps = parsedJson.knowledgeGaps || [];
-            
-            return {
-                knowledgeNetwork,
-                gaps: knowledgeGaps
-            };
-        } catch (error) {
-            console.error('Error parsing knowledge structure:', error);
-            console.error('Section content:', section);
-            throw new Error(`Failed to parse knowledge structure: ${error.message}`);
-        }
-    }
-
-
-
-    /**
-     * Generate insights from network analysis
-     */
-    private generateNetworkInsights(knowledgeNetwork: any, domainHierarchy: HierarchicalDomain[]): any[] {
-        const insights = [];
-
-        // Network structure insight
-        const bridgeCount = knowledgeNetwork.bridges?.length || 0;
-        const foundationCount = knowledgeNetwork.foundations?.length || 0;
-        const authorityCount = knowledgeNetwork.authorities?.length || 0;
-
-        insights.push({
-            title: "Knowledge Network Structure",
-            content: `Your knowledge network contains ${bridgeCount} bridge domain(s), ${foundationCount} foundational domain(s), and ${authorityCount} authority domain(s). This indicates ${bridgeCount > 0 ? 'strong interdisciplinary connections' : 'isolated knowledge areas'}.`,
-            keyPoints: [
-                `${bridgeCount} knowledge bridges connecting different domains`,
-                `${foundationCount} foundational domains providing core access`,
-                `${authorityCount} authority domains with deep expertise`,
-                `${domainHierarchy.length} total knowledge domains identified`
-            ]
         });
-
-        // Top bridge insight
-        if (knowledgeNetwork.bridges && knowledgeNetwork.bridges.length > 0) {
-            const topBridge = knowledgeNetwork.bridges[0];
-            insights.push({
-                title: "Primary Knowledge Bridge",
-                content: `${topBridge.domain} serves as your main knowledge bridge with ${topBridge.noteCount} notes. ${topBridge.explanation}`,
-                keyPoints: [
-                    `Domain: ${topBridge.domain}`,
-                    `Average centrality score: ${topBridge.averageScore?.toFixed(3)}`,
-                    `Total notes: ${topBridge.noteCount}`,
-                    topBridge.insights || "Connects multiple knowledge areas"
-                ]
-            });
+        
+        if (issuesFound > 0) {
+            console.warn(`🔍 Found ${issuesFound} note data issues. Check console for details.`);
+            console.log('💡 Tip: If you see dummy data, try regenerating the AI analysis.');
+        } else {
+            console.log('✅ All note data validated successfully against vault contents.');
         }
-
-        return insights;
     }
 
     /**
@@ -553,19 +481,6 @@ export class MasterAnalysisManager {
         
         return result;
     }
-    
-    // /**
-    //  * Simple string hash function for creating synthetic IDs
-    //  */
-    // private hashString(str: string): number {
-    //     let hash = 0;
-    //     for (let i = 0; i < str.length; i++) {
-    //         const char = str.charCodeAt(i);
-    //         hash = ((hash << 5) - hash) + char;
-    //         hash = hash & hash; // Convert to 32bit integer
-    //     }
-    //     return Math.abs(hash);
-    // }
 
     /**
      * Helper methods to extract IDs from section IDs - UPDATED for new structured ID system
@@ -581,439 +496,12 @@ export class MasterAnalysisManager {
         return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : sectionId;
     }
 
-    // // DEPRECATED: Keep old methods for backward compatibility
-    // private getMainClassCodeFromSection(sectionCode: string): string {
-    //     // Old method - convert to new system
-    //     return this.getClassIdFromSection(sectionCode);
-    // }
-
-    // private getDivisionCodeFromSection(sectionCode: string): string {
-    //     // Old method - convert to new system  
-    //     return this.getDivisionIdFromSection(sectionCode);
-    // }
-
-    private parseKnowledgeEvolution(section: string, analysisData: VaultAnalysisData): KnowledgeEvolutionData {
-        // Create simplified timeline analysis
-        const timeline: TimelineAnalysis = {
-            narrative: {
-                title: 'Knowledge Evolution Journey',
-                content: this.extractNarrative(section),
-                keyPoints: this.extractKeyPoints(this.extractNarrative(section)),
-                recommendations: []
-            },
-            phases: [], // Simplified - no time period analysis
-            trends: {
-                productivity: 'stable' as const,
-                diversity: 'expanding' as const,
-                depth: 'increasing' as const
-            }
-        };
-
-        return {
-            timeline,
-            topicPatterns: this.parseTopicPatterns(section, analysisData),
-            focusShift: this.parseFocusShift(section, analysisData),
-            learningVelocity: this.parseLearningVelocity(section, analysisData),
-            insights: this.extractInsights(section)
-        };
-    }
-
-
-
-    private parseRecommendedActions(section: string, analysisData: VaultAnalysisData): KnowledgeActionsData {
-        return {
-            maintenance: this.parseMaintenanceActions(section, analysisData),
-            connections: this.parseConnectionSuggestions(section, analysisData),
-            learningPaths: this.parseLearningPaths(section, analysisData),
-            organization: this.parseOrganizationSuggestions(section, analysisData)
-        };
-    }
-
-    // Helper parsing methods
-    private extractInsights(section: string): any[] {
-        // Extract insight items from the section
-        const insights = section.match(/## .+?\n([\s\S]*?)(?=\n## |\n---|\n# |$)/g) || [];
-        return insights.slice(0, 3).map(insight => ({
-            title: insight.match(/## (.+)/)?.[1] || 'Insight',
-            content: insight.replace(/## .+\n/, '').trim(),
-            keyPoints: this.extractKeyPoints(insight)
-        }));
-    }
-
-    private extractKeyPoints(text: string): string[] {
-        const points = text.match(/[•\-*]\s*(.+)/g) || [];
-        return points.map(point => point.replace(/^[•\-*]\s*/, '').trim()).slice(0, 5);
-    }
-
-    private extractNarrative(section: string): string {
-        const narrative = section.match(/## Timeline Narrative\n([\s\S]*?)(?=\n## |\n---|\n# |$)/);
-        return narrative?.[1]?.trim() || 'No narrative available';
-    }
-
-    private extractKnowledgeGaps(section: string): string[] {
-        const gapsSection = section.match(/## Knowledge Gaps\n([\s\S]*?)(?=\n## |\n---|\n# |$)/);
-        if (!gapsSection) return [];
-        
-        const gaps = gapsSection[1].match(/[•\-*]\s*(.+)/g) || [];
-        return gaps.map(gap => gap.replace(/^[•\-*]\s*/, '').trim()).slice(0, 5);
-    }
-
-    // Simplified parsing methods
-    private parseTopicPatterns(section: string, context: any): any {
-        return {
-            exploration: { title: 'Topic Exploration', content: 'Analysis pending', keyPoints: [] },
-            introductionTimeline: [],
-            strategy: { style: 'balanced', consistency: 'exploratory' }
-        };
-    }
-
-    private parseFocusShift(section: string, context: any): any {
-        return {
-            narrative: { title: 'Focus Evolution', content: 'Analysis pending', keyPoints: [] },
-            shifts: [],
-            patterns: { frequency: 'occasional', direction: 'expanding' }
-        };
-    }
-
-    private parseLearningVelocity(section: string, context: any): any {
-        return {
-            trends: { title: 'Learning Velocity', content: 'Analysis pending', keyPoints: [] },
-            metrics: [],
-            optimization: { peakPeriods: [], recommendations: [], productivityScore: 7.5 }
-        };
-    }
-
-    private parseMaintenanceActions(section: string, context: any): any[] {
-        return [];
-    }
-
-    private parseConnectionSuggestions(section: string, context: any): any[] {
-        return [];
-    }
-
-    private parseLearningPaths(section: string, context: any): any[] {
-        return [];
-    }
-
-    private parseOrganizationSuggestions(section: string, context: any): any[] {
-        return [];
-    }
-
     public updateSettings(settings: GraphAnalysisSettings): void {
         this.settings = settings;
         this.aiService.updateSettings(settings);
     }
 
-    /**
-     * Generate structure-specific analysis prompt
-     */
-    private generateStructureAnalysisPrompt(): string {
-        // Ensure DDC template is loaded
-        if (!this.ddcTemplate || this.ddcSectionsList.length === 0) {
-            console.error('DDC template not loaded or empty, cannot generate proper structure analysis prompt');
-            throw new Error('DDC template not loaded. Please ensure the DDC-template.json file is properly copied to the plugin directory.');
-        }
-
-        return `# KNOWLEDGE STRUCTURE ANALYSIS
-
-## Input Data Description
-The input vault-analysis.json data contains:
-- Metadata shows the total number of notes which can be used with centrality rankings.
-- Notes with titles, summaries, and knowledge domains (already classified with DDC section codes).
-- Notes have graph metrics showing their normalized centrality scores in the knowledge network.
-- Notes have centralityRankings showing their rank in the knowledge network (betweenness, closeness, eigenvector, degree) aiming for better understanding of the knowledge network structure.
-- Creation and modification dates for tracking knowledge evolution.
-
-## Expected Output Format
-You MUST output a JSON object with the following structure:
-\`\`\`
-{
-  "knowledgeNetwork": {
-    "bridges": [
-      {
-        "domain": "Computer Science",
-        "domainCode": "0-0-4",
-        "explanation": "Detailed explanation of why this domain serves as a bridge, mentioning how it connects different knowledge areas through high betweenness centrality",
-        "averageScore": 0.85,
-        "noteCount": 12,
-        "topNotes": [
-          {
-            "title": "Note Title",
-            "score": 0.95,
-            "rank": 1,
-            "path": "path/to/note.md"
-          }
-        ],
-        "connections": ["Mathematics", "Project Management"],
-        "insights": "Additional insights about this domain's bridging role"
-      }
-    ],
-    "foundations": [
-      {
-        "domain": "Mathematics",
-        "domainCode": "5-1-0",
-        "explanation": "Detailed explanation of why this domain serves as a foundation, mentioning high closeness centrality and central access to other knowledge areas",
-        "averageScore": 0.92,
-        "noteCount": 8,
-        "topNotes": [
-          {
-            "title": "Note Title",
-            "score": 0.98,
-            "rank": 1,
-            "path": "path/to/note.md"
-          }
-        ],
-        "reach": 25,
-        "insights": "Additional insights about this domain's foundational role"
-      }
-    ],
-    "authorities": [
-      {
-        "domain": "Project Management",
-        "domainCode": "6-5-8",
-        "explanation": "Detailed explanation of why this domain serves as an authority, mentioning high eigenvector centrality and connections to other important domains",
-        "averageScore": 0.78,
-        "noteCount": 15,
-        "topNotes": [
-          {
-            "title": "Note Title",
-            "score": 0.88,
-            "rank": 1,
-            "path": "path/to/note.md"
-          }
-        ],
-        "influence": 0.82,
-        "insights": "Additional insights about this domain's authority status"
-      }
-    ]
-  },
-  "knowledgeGaps": [
-    "Gap description 1",
-    "Gap description 2"
-  ]
-}
-\`\`\`
-
-### Analysis Approach
-1. **Domain-Level Analysis**: Analyze knowledge domains based on DDC classification from the vault-analysis.json file.
-2. **Knowledge Bridges (Betweenness Centrality)**: Identify domains that connect different knowledge areas. Look for domains whose notes have high betweenness centrality scores, indicating they serve as bridges between different knowledge clusters.
-3. **Knowledge Foundations (Closeness Centrality)**: Identify domains that provide central access to the knowledge network. Look for domains whose notes have high closeness centrality, indicating they're foundational concepts.
-4. **Knowledge Authorities (Eigenvector Centrality)**: Identify domains where you have the most developed expertise. Look for domains whose notes have high eigenvector centrality, indicating they're connected to other important concepts.
-5. **Aggregate Metrics**: For each domain, calculate average centrality scores across all notes in that domain.
-6. **Top Notes**: For each domain, identify the top 3-5 notes with highest centrality scores in that category.
-
-CRITICAL: Your response MUST focus on DOMAINS, not individual notes. Each entry should represent a knowledge domain with aggregated metrics and explanations of why that domain serves the specific network role.`;
-    }
-
-
-    /**
-     * Generate evolution-specific analysis prompt
-     */
-    private generateEvolutionAnalysisPrompt(): string {
-        return `# KNOWLEDGE EVOLUTION ANALYSIS
-
-## Timeline Narrative
-[Analyze note creation/modification patterns over time]
-
-## Topic Introduction Patterns  
-[Track how new knowledge domains emerge over time using section classification]
-
-## Learning Velocity Trends
-[Analyze productivity patterns using wordCount and time data]
-
-Please provide your analysis in this JSON format:
-
-\`\`\`json
-{
-  "timeline": {
-    "narrative": {
-      "title": "Knowledge Evolution Journey",
-      "content": "A detailed narrative describing how the knowledge has evolved over time...",
-      "keyPoints": ["Key point 1", "Key point 2", "Key point 3"]
-    },
-    "phases": [
-      {
-        "period": "Jan-Mar 2023",
-        "description": "Initial exploration phase focusing on...",
-        "domains": ["Domain 1", "Domain 2"],
-        "noteCount": 15,
-        "wordCount": 7500
-      }
-    ],
-    "trends": {
-      "productivity": "increasing",
-      "diversity": "expanding",
-      "depth": "increasing"
-    }
-  },
-  "topicPatterns": {
-    "exploration": {
-      "title": "Topic Exploration Pattern",
-      "content": "Analysis of how new topics are introduced and explored...",
-      "keyPoints": ["Point 1", "Point 2", "Point 3"]
-    },
-    "introductionTimeline": [
-      {
-        "period": "Jan 2023",
-        "newDomains": ["Domain A", "Domain B"],
-        "expandedDomains": ["Domain C"]
-      }
-    ],
-    "strategy": {
-      "style": "depth-first",
-      "consistency": "exploratory"
-    }
-  },
-  "focusShift": {
-    "narrative": {
-      "title": "Focus Evolution",
-      "content": "Analysis of how focus has shifted between domains...",
-      "keyPoints": ["Point 1", "Point 2", "Point 3"]
-    },
-    "shifts": [
-      {
-        "period": "Q1 to Q2 2023",
-        "from": ["Domain A", "Domain B"],
-        "to": ["Domain C", "Domain D"],
-        "reason": "Shift from theoretical to practical application"
-      }
-    ],
-    "patterns": {
-      "frequency": "quarterly",
-      "direction": "specializing"
-    }
-  },
-  "learningVelocity": {
-    "trends": {
-      "title": "Learning Velocity",
-      "content": "Analysis of the pace and efficiency of knowledge acquisition...",
-      "keyPoints": ["Point 1", "Point 2", "Point 3"]
-    },
-    "metrics": [
-      {
-        "period": "Jan 2023",
-        "notesCreated": 10,
-        "wordsWritten": 5000,
-        "domainsExplored": 3,
-        "trendIndicator": "up"
-      }
-    ],
-    "optimization": {
-      "peakPeriods": ["Feb 2023", "May 2023"],
-      "recommendations": ["Recommendation 1", "Recommendation 2"],
-      "productivityScore": 8.5
-    }
-  },
-  "insights": [
-    {
-      "title": "Key Evolution Insight",
-      "content": "Detailed insight about knowledge evolution pattern...",
-      "keyPoints": ["Point 1", "Point 2", "Point 3"]
-    }
-  ]
-}
-\`\`\``;
-    }
-
-    /**
-     * Generate actions-specific analysis prompt
-     */
-    private generateActionsAnalysisPrompt(): string {
-        return `# RECOMMENDED ACTIONS
-
-## Knowledge Maintenance (5 items)
-[Identify specific notes needing updates based on centrality and content]
-
-## Connection Opportunities (5 items)
-[Suggest note connections using centrality rankings and section relationships]
-
-## Learning Paths (3 paths)
-[Recommend learning sequences based on DDC section structure]
-
-## Organization Suggestions (5 items)
-[Suggest structural improvements using DDC section analysis]
-
-Please provide your analysis in this JSON format:
-
-\`\`\`json
-{
-  "maintenance": [
-    {
-      "title": "Update Core Concept X",
-      "path": "path/to/note.md",
-      "reason": "High centrality note with outdated information",
-      "priority": "high",
-      "suggestedAction": "Review and update with latest research"
-    }
-  ],
-  "connections": [
-    {
-      "title": "Connect Concepts A and B",
-      "notes": ["path/to/noteA.md", "path/to/noteB.md"],
-      "reason": "Strong conceptual overlap but no direct link",
-      "suggestedLink": "Concept A relates to Concept B through..."
-    }
-  ],
-  "learningPaths": [
-    {
-      "title": "Master Topic X",
-      "description": "Structured path to understand Topic X from basics to advanced",
-      "steps": ["Concept 1", "Concept 2", "Concept 3"],
-      "existingNotes": ["path/to/note1.md", "path/to/note2.md"],
-      "suggestedNewNotes": ["Concept 3 Application", "Advanced Topic X"]
-    }
-  ],
-  "organization": [
-    {
-      "title": "Restructure Domain Y",
-      "description": "Current structure is fragmented across multiple locations",
-      "impact": "Will improve findability and connection density",
-      "suggestedStructure": "Create a main index note with hierarchical organization"
-    }
-  ]
-}
-\`\`\``;
-    }
-
-    /**
-     * Generate comprehensive analysis instructions for all sections with optimized DDC approach
-     * UPDATED for new structured ID system
-     */
-    private generateComprehensiveAnalysisPrompt(): string {
-        // Combined prompt for backward compatibility
-        return `${this.generateStructureAnalysisPrompt()}
-
----
-
-${this.generateEvolutionAnalysisPrompt()}
-
----
-
-${this.generateActionsAnalysisPrompt()}
-
-**CRITICAL REMINDERS**:
-1. Notes are already classified with DDC section codes in their knowledgeDomain field
-2. Focus on providing accurate summary indicators and network analysis
-3. Your response MUST include the full JSON structure with all required sections:
-   - knowledgeDomainDistribution with summary
-   - knowledgeNetwork
-   - knowledgeGaps
-4. Provide accurate summary indicators (topDomain, bridgeMaker, growthTrend, recentFocus)
-5. Do NOT return a template response - analyze the actual content and provide real insights`;
-    }
-
-    /**
-     * NEW: Process AI response and build hierarchy for D3 visualization
-     */
-    public async processAIResponseForVisualization(
-        aiResponse: string, 
-        analysisData: VaultAnalysisData
-    ): Promise<HierarchicalDomain[]> {
-        // Instead of parsing AI response, build hierarchy directly from vault analysis data
-        console.log('Building domain hierarchy directly from vault analysis data for visualization');
-        return this.buildHierarchyFromVaultData(analysisData);
-    }
-
+ 
     /**
      * Check if a section ID is valid in the DDC template
      */
@@ -1116,170 +604,53 @@ ${this.generateActionsAnalysisPrompt()}
         return map;
     }
 
-    /**
-     * Helper method to flatten object keys for deep searching
-     */
-    private flattenObjectKeys(obj: any, prefix = ''): string[] {
-        let keys: string[] = [];
-        
-        for (const key in obj) {
-            if (obj.hasOwnProperty(key)) {
-                const newKey = prefix ? `${prefix}.${key}` : key;
-                if (typeof obj[key] === 'object' && obj[key] !== null) {
-                    keys = keys.concat(this.flattenObjectKeys(obj[key], newKey));
-                } else {
-                    keys.push(newKey);
-                }
-            }
-        }
-        
-        return keys;
-    }
-
-    /**
-     * Helper method to get a nested property using a path string
-     */
-    private getNestedProperty(obj: any, path: string): any {
-        const parts = path.split('.');
-        let current = obj;
-        
-        for (const part of parts) {
-            if (current === null || current === undefined) {
-                return undefined;
-            }
-            current = current[part];
-        }
-        
-        return current;
-    }
-
-    // NEW: Load analysis context once for all tab-specific analyses
-    private async loadAnalysisContext(analysisData: VaultAnalysisData): Promise<void> {
-        try {
-            // Check if context is already loaded in AIModelService
-            if (this.aiService.isContextLoaded()) {
-                console.log('Analysis context already loaded, skipping load');
-                this.contextLoaded = true;
-                return;
-            }
-            
-            // Convert analysis data to JSON string - use compact format to save tokens
-            const jsonData = JSON.stringify(analysisData);
-            
-            // Split into chunks
-            const chunks = this.chunkJsonData(jsonData);
-            const isChunked = chunks.length > 1;
-            
-            console.log(`Loading analysis context: ${isChunked ? `${chunks.length} chunks` : 'single chunk'}`);
-            
-            // Stage 1: Send all data chunks as background context
-            for (let i = 0; i < chunks.length; i++) {
-                let contextPrompt: string;
-                
-                if (isChunked) {
-                    // Multi-chunk format with chunk information
-                    contextPrompt = `This is chunk ${i + 1} of ${chunks.length} containing vault analysis data for an upcoming knowledge analysis task. 
-                    
-IMPORTANT: Store this data in your context for the next step. DO NOT generate a full analysis yet. 
-Simply confirm receipt with "Received chunk ${i + 1}/${chunks.length}" and wait for all chunks and final instructions.
-
-CHUNK DATA ${i + 1}/${chunks.length}:
-${chunks[i]}`;
-                } else {
-                    // Single chunk format (original vault data)
-                    contextPrompt = `I'm providing you with complete vault analysis data for an upcoming knowledge analysis task. 
-                    
-IMPORTANT: Store this data in your context for the next step. DO NOT generate a full analysis yet.
-Simply confirm receipt with "Received complete vault data" and wait for analysis instructions.
-
-VAULT ANALYSIS DATA:
-${chunks[i]}`;
-                }
-
-                const response = await this.aiService.storeDataChunk(contextPrompt, i + 1, chunks.length);
-                
-                // Add delays between chunks for rate limiting (only needed for multiple chunks)
-                if (isChunked && i < chunks.length - 1) {
-                    const delay = 2500;
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                }
-            }
-            
-            // Mark context as loaded
-            this.contextLoaded = true;
-            
-            // Brief pause after loading context
-            const pauseDelay = isChunked ? 3000 : 1000;
-            await new Promise(resolve => setTimeout(resolve, pauseDelay));
-            
-        } catch (error) {
-            console.error('ERROR - Failed to load analysis context:', error);
-            throw new Error(`Failed to load analysis context: ${error.message}`);
-        }
-    }
-
-    // NEW: Generate Knowledge Structure Analysis
+    // NEW: Generate Knowledge Structure Analysis using structured output
     public async generateKnowledgeStructureAnalysis(): Promise<StructureAnalysisData> {
         try {
-            console.log('Generating Knowledge Structure Analysis...');
+            console.log('Generating Knowledge Structure Analysis with structured output...');
             
             const analysisData = await this.loadVaultAnalysisData();
             if (!analysisData) {
                 throw new Error('No vault analysis data found. Please generate vault analysis first.');
             }
             
-            // Ensure DDC template is loaded
-            console.log('Checking DDC template status: ', {
-                templateLoaded: !!this.ddcTemplate,
-                sectionsListLength: this.ddcSectionsList.length
-            });
+            // Build the system, context, and instruction like in test-ai-model.js
+            const system = "You are an expert in knowledge management. You are highly skilled in applying graph theory and network analysis to knowledge graphs. Use your expertise to extract insights from the provided context which contains knowledge domains and centrality rankings. Please focus on network analysis and determining knowledge gaps.";
             
-            if (!this.ddcTemplate) {
-                console.log('DDC template not loaded, attempting to load it now...');
-                try {
-                    await this.loadDDCTemplate();
-                    console.log('DDC template loaded successfully on second attempt');
-                } catch (ddcError) {
-                    console.error('Failed to load DDC template on second attempt:', ddcError);
-                    throw new Error(`DDC template loading failed: ${ddcError.message}. Please ensure the DDC-template.json file is properly copied to the plugin directory.`);
-                }
-            }
+            const context = `VAULT ANALYSIS DATA:
+${JSON.stringify(analysisData)}`;
             
-            if (!this.ddcTemplate || this.ddcSectionsList.length === 0) {
-                throw new Error('DDC template not loaded or empty. Please ensure the DDC-template.json file is properly copied to the plugin directory.');
-            }
-            
-            // Ensure context is loaded
-            if (!this.contextLoaded) {
-                await this.loadAnalysisContext(analysisData);
-            }
-            
-            // Load existing structure analysis data if available
-            let existingStructureData: StructureAnalysisData | null = null;
-            try {
-                existingStructureData = await this.loadCachedTabAnalysis('structure') as StructureAnalysisData;
-            } catch (error) {
-                console.log('No existing structure analysis found, will create new one');
-            }
-            
-            // Generate structure-specific analysis
-            const structurePrompt = `Using the vault analysis data I provided earlier, generate a focused analysis for the Knowledge Structure tab following these exact instructions:
+            const instruction = `Analyze the vault data to identify key knowledge domains using network centrality metrics. Return a JSON object matching the required schema.
 
-IMPORTANT: You MUST respond with properly formatted JSON in code blocks as specified. Do not say you're waiting for data or need more information - all required data has already been provided.
+**Network Analysis Framework:**
+- **Knowledge Bridges** (Betweenness Centrality): Domains that connect disparate knowledge areas and facilitate interdisciplinary thinking
+- **Knowledge Foundations** (Closeness Centrality): Core domains that are central to the knowledge network and serve as conceptual starting points  
+- **Knowledge Authorities** (Eigenvector Centrality): Domains representing areas of expertise with deep interconnections to other important concepts
 
-${this.generateStructureAnalysisPrompt()}
+**Instructions:**
+1. Identify top-ranking domains for each centrality type based on the provided data
+2. For each domain, collect the contributing notes internally and output top 3 notes for each domain
+3. Explain why each domain qualifies as a bridge/foundation/authority based on its network position
+4. Use only domains explicitly present in the vault data - do not invent domains
+5. Treat domains as independent entities (multiple domains from one note are separate)`;
 
-CRITICAL REMINDERS:
-1. Notes are already classified with DDC section codes in their knowledgeDomain field
-2. Focus on providing accurate summary indicators and network analysis
-3. Your response MUST include the full JSON structure with all required sections
-4. Do NOT return a template response - analyze the actual content and provide real insights`;
-
-            // Use the new tab-specific analysis method
-            const response = await this.aiService.generateTabAnalysis('structure', structurePrompt);
+            // Combine system, context, and instruction
+            const prompt = `${system}\n\n${context}\n\n${instruction}`;
             
-            // Parse the structure-specific response
-            const structureData = this.parseKnowledgeStructure(response.result, analysisData);
+            // Get the response schema for knowledge network analysis
+            const responseSchema = this.aiService.createKnowledgeNetworkSchema();
+            
+            // Use the new structured output method
+            const response = await this.aiService.generateStructuredAnalysis<any>(
+                prompt,
+                responseSchema,
+                8000, // maxOutputTokens
+                0.3,  // temperature
+                0.72  // topP
+            );
+            
+            // Parse the structured response directly (it's already JSON)
+            const structureData = this.parseStructuredKnowledgeNetwork(response.result, analysisData);
             
             // Create structured analysis data
             const tabData: StructureAnalysisData = {
@@ -1300,101 +671,32 @@ CRITICAL REMINDERS:
         }
     }
 
-    // NEW: Generate Knowledge Evolution Analysis
-    public async generateKnowledgeEvolutionAnalysis(): Promise<EvolutionAnalysisData> {
+    /**
+     * NEW: Parse structured knowledge network response (replaces old parseKnowledgeStructure)
+     */
+    private parseStructuredKnowledgeNetwork(structuredResponse: any, analysisData: VaultAnalysisData): KnowledgeStructureData {
         try {
-            console.log('Generating Knowledge Evolution Analysis...');
-            
-            const analysisData = await this.loadVaultAnalysisData();
-            if (!analysisData) {
-                throw new Error('No vault analysis data found. Please generate vault analysis first.');
-            }
-            
-            // Ensure context is loaded
-            if (!this.contextLoaded) {
-                await this.loadAnalysisContext(analysisData);
-            }
-            
-            // Generate evolution-specific analysis
-            const evolutionPrompt = `Using the vault analysis data I provided earlier, generate a focused analysis for the Knowledge Evolution tab following these exact instructions:
-
-IMPORTANT: You MUST respond with properly formatted JSON in code blocks as specified. Do not say you're waiting for data or need more information - all required data has already been provided.
-
-${this.generateEvolutionAnalysisPrompt()}
-
-CRITICAL: Your response MUST include all required JSON objects in code blocks exactly as specified in the instructions.`;
-
-            // Use the new tab-specific analysis method
-            const response = await this.aiService.generateTabAnalysis('evolution', evolutionPrompt);
-            
-            // Parse the evolution-specific response
-            const evolutionData = this.parseKnowledgeEvolution(response.result, analysisData);
-            
-            // Create structured analysis data
-            const tabData: EvolutionAnalysisData = {
-                generatedAt: new Date().toISOString(),
-                sourceAnalysisId: this.generateAnalysisId(analysisData),
-                apiProvider: 'Google Gemini',
-                tokenUsage: response.tokenUsage || { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 },
-                knowledgeEvolution: evolutionData
+            // The response is already parsed JSON from structured output
+            const knowledgeNetwork = structuredResponse.knowledgeNetwork || {
+                bridges: [],
+                foundations: [],
+                authorities: []
             };
             
-            // Cache the results
-            await this.cacheTabAnalysis('evolution', tabData);
+            // Validate note data against vault analysis
+            this.validateNetworkNodeData(knowledgeNetwork, analysisData);
             
-            return tabData;
-        } catch (error) {
-            console.error('Failed to generate Knowledge Evolution Analysis:', error);
-            throw error;
-        }
-    }
-
-    // NEW: Generate Recommended Actions Analysis
-    public async generateRecommendedActionsAnalysis(): Promise<ActionsAnalysisData> {
-        try {
-            console.log('Generating Recommended Actions Analysis...');
+            // Extract knowledge gaps
+            const knowledgeGaps = structuredResponse.knowledgeGaps || [];
             
-            const analysisData = await this.loadVaultAnalysisData();
-            if (!analysisData) {
-                throw new Error('No vault analysis data found. Please generate vault analysis first.');
-            }
-            
-            // Ensure context is loaded
-            if (!this.contextLoaded) {
-                await this.loadAnalysisContext(analysisData);
-            }
-            
-            // Generate actions-specific analysis
-            const actionsPrompt = `Using the vault analysis data I provided earlier, generate a focused analysis for the Recommended Actions tab following these exact instructions:
-
-IMPORTANT: You MUST respond with properly formatted JSON in code blocks as specified. Do not say you're waiting for data or need more information - all required data has already been provided.
-
-${this.generateActionsAnalysisPrompt()}
-
-CRITICAL: Your response MUST include all required JSON objects in code blocks exactly as specified in the instructions.`;
-
-            // Use the new tab-specific analysis method
-            const response = await this.aiService.generateTabAnalysis('actions', actionsPrompt);
-            
-            // Parse the actions-specific response
-            const actionsData = this.parseRecommendedActions(response.result, analysisData);
-            
-            // Create structured analysis data
-            const tabData: ActionsAnalysisData = {
-                generatedAt: new Date().toISOString(),
-                sourceAnalysisId: this.generateAnalysisId(analysisData),
-                apiProvider: 'Google Gemini',
-                tokenUsage: response.tokenUsage || { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 },
-                recommendedActions: actionsData
+            return {
+                knowledgeNetwork,
+                gaps: knowledgeGaps
             };
-            
-            // Cache the results
-            await this.cacheTabAnalysis('actions', tabData);
-            
-            return tabData;
         } catch (error) {
-            console.error('Failed to generate Recommended Actions Analysis:', error);
-            throw error;
+            console.error('Error parsing structured knowledge network:', error);
+            console.error('Structured response:', structuredResponse);
+            throw new Error(`Failed to parse structured knowledge network: ${error.message}`);
         }
     }
 
@@ -1410,38 +712,6 @@ CRITICAL: Your response MUST include all required JSON objects in code blocks ex
             console.log(`${tabName} analysis cached successfully in responses directory`);
         } catch (error) {
             console.error(`Failed to cache ${tabName} analysis:`, error);
-        }
-    }
-
-    /**
-     * Copy the DDC template file from the source directory to the plugin directory
-     * This is a fallback mechanism if the file is not found in the expected location
-     */
-    private async copyDDCTemplateFile(): Promise<boolean> {
-        try {
-            // Check if the file exists in the source directory
-            const sourceFile = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/src/ai/DDC-template.json`;
-            const targetFile = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/DDC-template.json`;
-            
-            // Try to read from source directory
-            let sourceContent: string | null = null;
-            
-            try {
-                sourceContent = await this.app.vault.adapter.read(sourceFile);
-                console.log(`Found DDC template in source directory: ${sourceFile}`);
-            } catch (error) {
-                console.error('DDC template not found in source directory');
-                return false;
-            }
-            
-            // Write to target location
-            await this.app.vault.adapter.write(targetFile, sourceContent);
-            console.log(`Successfully copied DDC template from ${sourceFile} to ${targetFile}`);
-            
-            return true;
-        } catch (error) {
-            console.error('Failed to copy DDC template file:', error);
-            return false;
         }
     }
 
@@ -1504,5 +774,21 @@ CRITICAL: Your response MUST include all required JSON objects in code blocks ex
             console.error('Failed to create initial Knowledge Structure Analysis:', error);
             return null;
         }
+    }
+
+    // TODO: Implement these methods tomorrow with structured output approach
+    
+    /**
+     * TODO: Generate Knowledge Evolution Analysis using structured output (to be implemented)
+     */
+    public async generateKnowledgeEvolutionAnalysis(): Promise<EvolutionAnalysisData> {
+        throw new Error('Knowledge Evolution Analysis not yet implemented with structured output. Will be implemented tomorrow.');
+    }
+
+    /**
+     * TODO: Generate Recommended Actions Analysis using structured output (to be implemented)
+     */
+    public async generateRecommendedActionsAnalysis(): Promise<ActionsAnalysisData> {
+        throw new Error('Recommended Actions Analysis not yet implemented with structured output. Will be implemented tomorrow.');
     }
 }

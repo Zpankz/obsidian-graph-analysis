@@ -9,19 +9,20 @@ import { MasterAnalysisManager } from '../MasterAnalysisManager';
 
 export interface NetworkNode {
     domain: string;
-    domainCode: string;
+    domainCode?: string; // Optional since it might not be in the schema
     explanation: string;
-    averageScore: number;
-    noteCount: number;
+    averageScore?: number; // Optional since it might not be in the schema
+    noteCount?: number; // Optional since it might not be in the schema
     topNotes: Array<{
         title: string;
-        score: number;
-        rank: number;
+        score?: number; // Optional since schema only has rank
+        rank?: number; // Optional but likely present
         path: string;
     }>;
     connections?: string[];
+    coverage?: string[]; // For foundations
+    influence?: string[]; // For authorities
     reach?: number;
-    influence?: number;
     insights?: string;
 }
 
@@ -111,92 +112,13 @@ export class KnowledgeStructureManager {
             await this.loadCachedStructureData();
         }
 
-        // Load domain hierarchy if not already loaded
-        if (!this.domainHierarchy || this.domainHierarchy.length === 0) {
-            try {
-                // Load domain hierarchy from vault-analysis.json
-                const filePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/vault-analysis.json`;
-                const content = await this.app.vault.adapter.read(filePath);
-                const vaultAnalysisData = JSON.parse(content);
-                
-                if (vaultAnalysisData && vaultAnalysisData.results) {
-                    // Create a new MasterAnalysisManager instance
-                    const masterAnalysisManager = new MasterAnalysisManager(this.app, this.settings);
-                    
-                    // Ensure DDC template is loaded
-                    await masterAnalysisManager.ensureDDCTemplateLoaded();
-                    
-                    // Build hierarchy
-                    this.domainHierarchy = masterAnalysisManager.buildHierarchyFromVaultData(vaultAnalysisData);
-                }
-            } catch (error) {
-                console.error('Failed to load domain hierarchy:', error);
-            }
-        }
-
         // Always create the three main sections - they will handle their own empty states
         await this.createKnowledgeDomainDistributionSection();
         await this.createKnowledgeNetworkAnalysisSection();
         await this.createKnowledgeGapSection();
     }
 
-    private renderPlaceholder(): void {
-        // Create main container
-        const placeholderDiv = document.createElement('div');
-        placeholderDiv.className = 'structure-placeholder';
-        this.container.appendChild(placeholderDiv);
-        
-        // Create content container
-        const contentDiv = document.createElement('div');
-        contentDiv.className = 'placeholder-content';
-        placeholderDiv.appendChild(contentDiv);
-        
-        // Create header with icon
-        const header = document.createElement('h3');
-        contentDiv.appendChild(header);
-        
-        const headerIcon = document.createElement('span');
-        headerIcon.style.display = 'inline-flex';
-        headerIcon.style.alignItems = 'center';
-        headerIcon.style.marginRight = '8px';
-        headerIcon.style.verticalAlign = 'middle';
-        header.appendChild(headerIcon);
-        setIcon(headerIcon, 'layout-panel-top');
-        
-        header.appendChild(document.createTextNode('Knowledge Structure Analysis'));
-        
-        // Create description
-        const description = document.createElement('p');
-        description.textContent = 'Generate vault analysis to see your knowledge structure insights.';
-        contentDiv.appendChild(description);
-        
-        // Create features container
-        const featuresDiv = document.createElement('div');
-        featuresDiv.className = 'placeholder-features';
-        contentDiv.appendChild(featuresDiv);
-        
-        // Create feature items
-        const features = [
-            { icon: 'target', text: 'Domain Distribution' },
-            { icon: 'network', text: 'Knowledge Network' },
-            { icon: 'search', text: 'Knowledge Gaps' }
-        ];
-        
-        features.forEach(feature => {
-            const featureItem = document.createElement('div');
-            featureItem.className = 'feature-item';
-            featuresDiv.appendChild(featureItem);
-            
-            const iconSpan = document.createElement('span');
-            iconSpan.className = 'feature-icon';
-            featureItem.appendChild(iconSpan);
-            setIcon(iconSpan, feature.icon);
-            
-            const textSpan = document.createElement('span');
-            textSpan.textContent = feature.text;
-            featureItem.appendChild(textSpan);
-        });
-    }
+
 
     /**
      * Section 1: Knowledge Domain Distribution
@@ -211,36 +133,84 @@ export class KnowledgeStructureManager {
             cls: 'vault-analysis-section-title'
         });
 
-        // Check if we have hierarchical data
-        if (!this.domainHierarchy || this.domainHierarchy.length === 0) {
-            this.createEmptyStateFn(section, 'Generate vault analysis to see your knowledge domain distribution.');
-            return;
-        }
+        // Create the domain distribution chart using vault analysis data
+        await this.createDomainDistributionChart(section);
+    }
 
-        // Create chart container with proper sizing
-        const chartContainer = section.createEl('div', { 
-            cls: 'domain-chart-container'
-        });
-        
-        // Prepare data for the domain distribution component
-        const domainDistributionData: DomainDistributionData = {
-            domainHierarchy: this.domainHierarchy,
-            domainConnections: this.domainConnections || []
-        };
-        
-        // Create and render the domain distribution chart
-        const domainChart = new DomainDistributionChart(
-            this.app,
-            this.settings,
-            chartContainer,
-            {
-                chartType: 'sunburst',
-                showTooltips: true,
-                showLabels: true
+    /**
+     * Create domain distribution chart - centralized method
+     * Uses vault analysis data directly without relying on cached structure files
+     */
+    public async createDomainDistributionChart(container: HTMLElement): Promise<void> {
+        try {
+            // Try to build hierarchy from vault analysis data
+            const domainData = await this.buildDomainHierarchyFromVaultAnalysis();
+            
+            if (!domainData || !domainData.domainHierarchy || domainData.domainHierarchy.length === 0) {
+                this.createEmptyStateFn(container, 'Generate vault analysis to see your knowledge domain distribution.');
+                return;
             }
-        );
-        
-        await domainChart.renderWithData(domainDistributionData);
+
+            // Create chart container with proper sizing
+            const chartContainer = container.createEl('div', { 
+                cls: 'domain-chart-container'
+            });
+            
+            // Create and render the domain distribution chart
+            const domainChart = new DomainDistributionChart(
+                this.app,
+                this.settings,
+                chartContainer,
+                {
+                    chartType: 'sunburst',
+                    showTooltips: true,
+                    showLabels: true
+                }
+            );
+            
+            await domainChart.renderWithData(domainData);
+        } catch (error) {
+            console.error('Error creating domain distribution chart:', error);
+            const errorMsg = container.createEl('div', { cls: 'error-message' });
+            errorMsg.createEl('p', {
+                text: `Failed to create domain chart: ${error.message}`,
+                cls: 'error-text'
+            });
+        }
+    }
+
+    /**
+     * Build domain hierarchy from vault analysis data
+     * This is now centralized in KnowledgeStructureManager
+     */
+    private async buildDomainHierarchyFromVaultAnalysis(): Promise<DomainDistributionData | null> {
+        try {
+            // Load vault analysis data
+            const filePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/vault-analysis.json`;
+            const content = await this.app.vault.adapter.read(filePath);
+            const vaultData = JSON.parse(content);
+            
+            if (!vaultData?.results || vaultData.results.length === 0) {
+                return null;
+            }
+            
+            // Create a new MasterAnalysisManager instance for hierarchy building
+            const masterAnalysisManager = new MasterAnalysisManager(this.app, this.settings);
+            
+            // Ensure DDC template is loaded
+            await masterAnalysisManager.ensureDDCTemplateLoaded();
+            
+            // Use MasterAnalysisManager's implementation to build the hierarchy
+            const domainHierarchy = masterAnalysisManager.buildHierarchyFromVaultData(vaultData);
+            
+            return {
+                domainHierarchy,
+                domainConnections: []
+            };
+        } catch (error) {
+            console.error('Failed to build domain hierarchy from vault analysis:', error);
+            return null;
+        }
     }
 
     /**
@@ -260,7 +230,7 @@ export class KnowledgeStructureManager {
 
         const networkData = this.data?.knowledgeNetwork;
 
-        // Check if we have any network data
+         // Check if we have any network data
         if (!networkData || (!networkData.bridges?.length && !networkData.foundations?.length && !networkData.authorities?.length)) {
             this.createEmptyStateFn(section, 'Generate AI analysis to identify knowledge bridges, foundations, and authorities in your vault\'s network structure.');
             return;
@@ -407,13 +377,9 @@ export class KnowledgeStructureManager {
             const domainItem = document.createElement('div');
             domainItem.className = 'network-domain-item';
             domainItem.style.padding = '20px';
-            // Use alternating background colors for visual separation
-            if (index % 2 === 1) {
-                domainItem.style.background = 'var(--background-secondary-alt)';
-            }
-            // Add margin between items instead of border
+            // Add subtle separator line between items
             if (index > 0) {
-                domainItem.style.marginTop = '4px';
+                domainItem.style.borderTop = '1px solid var(--background-modifier-border)';
             }
             content.appendChild(domainItem);
             
@@ -434,16 +400,7 @@ export class KnowledgeStructureManager {
             domainName.style.color = 'var(--text-accent)';
             domainHeader.appendChild(domainName);
             
-            const domainStats = document.createElement('span');
-            domainStats.className = 'network-domain-stats';
-            domainStats.textContent = `${node.averageScore.toFixed(3)} • ${node.noteCount} notes`;
-            domainStats.style.fontSize = '12px';
-            domainStats.style.color = 'var(--text-muted)';
-            domainStats.style.fontWeight = '500';
-            domainStats.style.padding = '4px 8px';
-            domainStats.style.background = 'var(--background-secondary)';
-            domainStats.style.borderRadius = '12px';
-            domainHeader.appendChild(domainStats);
+
 
             // Domain explanation
             const explanation = document.createElement('p');
@@ -515,11 +472,30 @@ export class KnowledgeStructureManager {
                     noteLink.style.whiteSpace = 'nowrap';
                     noteLink.style.overflow = 'hidden';
                     noteLink.style.textOverflow = 'ellipsis';
+                    noteLink.style.transition = 'color 0.2s ease, opacity 0.2s ease';
+                    noteLink.style.borderRadius = '4px';
+                    noteLink.style.padding = '2px 4px';
                     noteItem.appendChild(noteLink);
+
+                    // Add hover effects
+                    noteLink.addEventListener('mouseenter', () => {
+                        noteLink.style.color = 'var(--text-accent-hover)';
+                        noteLink.style.background = 'var(--background-modifier-hover)';
+                        noteLink.style.textDecoration = 'underline';
+                    });
+
+                    noteLink.addEventListener('mouseleave', () => {
+                        noteLink.style.color = 'var(--text-accent)';
+                        noteLink.style.background = 'transparent';
+                        noteLink.style.textDecoration = 'none';
+                    });
 
                     const noteScore = document.createElement('span');
                     noteScore.className = 'network-note-score';
-                    noteScore.textContent = note.score.toFixed(3);
+                    // Handle missing score property, use rank as fallback
+                    const scoreText = note.score !== undefined ? note.score.toFixed(3) : 
+                                     (note.rank !== undefined ? `#${note.rank}` : 'N/A');
+                    noteScore.textContent = scoreText;
                     noteScore.style.color = 'var(--text-muted)';
                     noteScore.style.fontWeight = '500';
                     noteScore.style.marginLeft = '8px';
@@ -527,12 +503,225 @@ export class KnowledgeStructureManager {
 
                     // Make note clickable
                     noteLink.addEventListener('click', async () => {
-                        const file = this.app.vault.getAbstractFileByPath(note.path);
-                        if (file) {
-                            await this.app.workspace.openLinkText(note.path, '');
+                        try {
+                            // Try to get the file using getFileByPath which returns TFile or null
+                            const tFile = this.app.vault.getFileByPath(note.path);
+                            if (tFile) {
+                                // Open the file in the active leaf
+                                const leaf = this.app.workspace.getLeaf(false);
+                                await leaf.openFile(tFile);
+                            } else {
+                                // Fallback: try to open by link text using title
+                                await this.app.workspace.openLinkText(note.title, '');
+                            }
+                        } catch (error) {
+                            console.error('Failed to open note:', error);
+                            // Additional fallback: try to open by path directly
+                            try {
+                                await this.app.workspace.openLinkText(note.path, '');
+                            } catch (fallbackError) {
+                                console.error('Fallback also failed:', fallbackError);
+                            }
                         }
                     });
                 });
+            }
+
+            // Connections section (for bridges)
+            if (node.connections && node.connections.length > 0) {
+                const connectionsSection = document.createElement('div');
+                connectionsSection.className = 'network-connections-section';
+                connectionsSection.style.marginBottom = '14px';
+                connectionsSection.style.padding = '12px';
+                connectionsSection.style.background = 'var(--background-secondary-alt)';
+                connectionsSection.style.borderRadius = '8px';
+                domainItem.appendChild(connectionsSection);
+
+                const connectionsHeader = document.createElement('div');
+                connectionsHeader.className = 'network-connections-header';
+                connectionsHeader.style.fontSize = '14px';
+                connectionsHeader.style.fontWeight = '600';
+                connectionsHeader.style.color = 'var(--text-muted)';
+                connectionsHeader.style.marginBottom = '8px';
+                connectionsHeader.style.display = 'flex';
+                connectionsHeader.style.alignItems = 'center';
+                connectionsHeader.style.gap = '6px';
+                connectionsSection.appendChild(connectionsHeader);
+
+                const connectionsIcon = document.createElement('span');
+                connectionsIcon.style.display = 'inline-flex';
+                connectionsIcon.style.alignItems = 'center';
+                connectionsHeader.appendChild(connectionsIcon);
+                setIcon(connectionsIcon, 'link');
+
+                const connectionsText = document.createElement('span');
+                connectionsText.textContent = 'Connections';
+                connectionsHeader.appendChild(connectionsText);
+
+                const connectionsList = document.createElement('div');
+                connectionsList.className = 'network-connections-list';
+                connectionsList.style.fontSize = '13px';
+                connectionsList.style.color = 'var(--text-normal)';
+                connectionsList.style.lineHeight = '1.5';
+                connectionsSection.appendChild(connectionsList);
+
+                node.connections.forEach((connection, connIndex) => {
+                    const connectionItem = document.createElement('span');
+                    connectionItem.textContent = connection;
+                    connectionItem.style.display = 'inline-block';
+                    connectionItem.style.margin = '2px 4px 2px 0';
+                    connectionItem.style.padding = '2px 6px';
+                    connectionItem.style.background = 'var(--background-primary)';
+                    connectionItem.style.borderRadius = '4px';
+                    connectionItem.style.fontSize = '12px';
+                    connectionItem.style.border = '1px solid var(--background-modifier-border)';
+                    connectionsList.appendChild(connectionItem);
+                });
+            }
+
+            // Coverage section (for foundations)
+            if (node.coverage && node.coverage.length > 0) {
+                const coverageSection = document.createElement('div');
+                coverageSection.className = 'network-coverage-section';
+                coverageSection.style.marginBottom = '14px';
+                coverageSection.style.padding = '12px';
+                coverageSection.style.background = 'var(--background-secondary-alt)';
+                coverageSection.style.borderRadius = '8px';
+                domainItem.appendChild(coverageSection);
+
+                const coverageHeader = document.createElement('div');
+                coverageHeader.className = 'network-coverage-header';
+                coverageHeader.style.fontSize = '14px';
+                coverageHeader.style.fontWeight = '600';
+                coverageHeader.style.color = 'var(--text-muted)';
+                coverageHeader.style.marginBottom = '8px';
+                coverageHeader.style.display = 'flex';
+                coverageHeader.style.alignItems = 'center';
+                coverageHeader.style.gap = '6px';
+                coverageSection.appendChild(coverageHeader);
+
+                const coverageIcon = document.createElement('span');
+                coverageIcon.style.display = 'inline-flex';
+                coverageIcon.style.alignItems = 'center';
+                coverageHeader.appendChild(coverageIcon);
+                setIcon(coverageIcon, 'layers');
+
+                const coverageText = document.createElement('span');
+                coverageText.textContent = 'Coverage';
+                coverageHeader.appendChild(coverageText);
+
+                const coverageList = document.createElement('div');
+                coverageList.className = 'network-coverage-list';
+                coverageList.style.fontSize = '13px';
+                coverageList.style.color = 'var(--text-normal)';
+                coverageList.style.lineHeight = '1.5';
+                coverageSection.appendChild(coverageList);
+
+                node.coverage.forEach((coverage, covIndex) => {
+                    const coverageItem = document.createElement('span');
+                    coverageItem.textContent = coverage;
+                    coverageItem.style.display = 'inline-block';
+                    coverageItem.style.margin = '2px 4px 2px 0';
+                    coverageItem.style.padding = '2px 6px';
+                    coverageItem.style.background = 'var(--background-primary)';
+                    coverageItem.style.borderRadius = '4px';
+                    coverageItem.style.fontSize = '12px';
+                    coverageItem.style.border = '1px solid var(--background-modifier-border)';
+                    coverageList.appendChild(coverageItem);
+                });
+            }
+
+            // Influence section (for authorities)
+            if (node.influence && node.influence.length > 0) {
+                const influenceSection = document.createElement('div');
+                influenceSection.className = 'network-influence-section';
+                influenceSection.style.marginBottom = '14px';
+                influenceSection.style.padding = '12px';
+                influenceSection.style.background = 'var(--background-secondary-alt)';
+                influenceSection.style.borderRadius = '8px';
+                domainItem.appendChild(influenceSection);
+
+                const influenceHeader = document.createElement('div');
+                influenceHeader.className = 'network-influence-header';
+                influenceHeader.style.fontSize = '14px';
+                influenceHeader.style.fontWeight = '600';
+                influenceHeader.style.color = 'var(--text-muted)';
+                influenceHeader.style.marginBottom = '8px';
+                influenceHeader.style.display = 'flex';
+                influenceHeader.style.alignItems = 'center';
+                influenceHeader.style.gap = '6px';
+                influenceSection.appendChild(influenceHeader);
+
+                const influenceIcon = document.createElement('span');
+                influenceIcon.style.display = 'inline-flex';
+                influenceIcon.style.alignItems = 'center';
+                influenceHeader.appendChild(influenceIcon);
+                setIcon(influenceIcon, 'zap');
+
+                const influenceText = document.createElement('span');
+                influenceText.textContent = 'Influence';
+                influenceHeader.appendChild(influenceText);
+
+                const influenceList = document.createElement('div');
+                influenceList.className = 'network-influence-list';
+                influenceList.style.fontSize = '13px';
+                influenceList.style.color = 'var(--text-normal)';
+                influenceList.style.lineHeight = '1.5';
+                influenceSection.appendChild(influenceList);
+
+                node.influence.forEach((influence, infIndex) => {
+                    const influenceItem = document.createElement('span');
+                    influenceItem.textContent = influence;
+                    influenceItem.style.display = 'inline-block';
+                    influenceItem.style.margin = '2px 4px 2px 0';
+                    influenceItem.style.padding = '2px 6px';
+                    influenceItem.style.background = 'var(--background-primary)';
+                    influenceItem.style.borderRadius = '4px';
+                    influenceItem.style.fontSize = '12px';
+                    influenceItem.style.border = '1px solid var(--background-modifier-border)';
+                    influenceList.appendChild(influenceItem);
+                });
+            }
+
+            // Insights section
+            if (node.insights) {
+                const insightsSection = document.createElement('div');
+                insightsSection.className = 'network-insights-section';
+                insightsSection.style.marginBottom = '14px';
+                insightsSection.style.padding = '12px';
+                insightsSection.style.background = 'var(--background-secondary-alt)';
+                insightsSection.style.borderRadius = '8px';
+                domainItem.appendChild(insightsSection);
+
+                const insightsHeader = document.createElement('div');
+                insightsHeader.className = 'network-insights-header';
+                insightsHeader.style.fontSize = '14px';
+                insightsHeader.style.fontWeight = '600';
+                insightsHeader.style.color = 'var(--text-muted)';
+                insightsHeader.style.marginBottom = '8px';
+                insightsHeader.style.display = 'flex';
+                insightsHeader.style.alignItems = 'center';
+                insightsHeader.style.gap = '6px';
+                insightsSection.appendChild(insightsHeader);
+
+                const insightsIcon = document.createElement('span');
+                insightsIcon.style.display = 'inline-flex';
+                insightsIcon.style.alignItems = 'center';
+                insightsHeader.appendChild(insightsIcon);
+                setIcon(insightsIcon, 'lightbulb');
+
+                const insightsText = document.createElement('span');
+                insightsText.textContent = 'Insights';
+                insightsHeader.appendChild(insightsText);
+
+                const insightsContent = document.createElement('p');
+                insightsContent.className = 'network-insights-content';
+                insightsContent.textContent = node.insights;
+                insightsContent.style.fontSize = '13px';
+                insightsContent.style.color = 'var(--text-normal)';
+                insightsContent.style.lineHeight = '1.5';
+                insightsContent.style.margin = '0';
+                insightsSection.appendChild(insightsContent);
             }
         });
     }

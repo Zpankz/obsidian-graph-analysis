@@ -2389,47 +2389,7 @@
     transition: opacity 0.3s ease;
 }
 
-/* Enhanced Domain Table Styles */
-.domain-table-container {
-    margin-top: 1.5rem;
-    overflow-x: auto;
-    border-radius: 8px;
-    border: 1px solid var(--background-modifier-border);
-    background: var(--background-primary);
-}
 
-.domain-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 14px;
-}
-
-.domain-table th {
-    background: var(--background-secondary);
-    color: var(--text-normal);
-    font-weight: 600;
-    padding: 12px 16px;
-    text-align: left;
-    border-bottom: 2px solid var(--background-modifier-border);
-    position: sticky;
-    top: 0;
-    z-index: 10;
-}
-
-.domain-table td {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--background-modifier-border-hover);
-    color: var(--text-normal);
-    vertical-align: top;
-}
-
-.domain-table tbody tr {
-    transition: background-color 0.2s ease;
-}
-
-.domain-table tbody tr:hover {
-    background: var(--background-modifier-hover);
-}
 
 .domain-name-container {
     display: flex;
@@ -2496,14 +2456,7 @@
         padding: 0.5rem;
     }
     
-    .domain-table {
-        font-size: 12px;
-    }
-    
-    .domain-table th,
-    .domain-table td {
-        padding: 8px 12px;
-    }
+
     
     .sunburst-tooltip {
         max-width: 220px;

@@ -71,89 +71,6 @@
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
-/* Table Styles */
-.domain-table-container {
-    overflow-x: auto;
-    border-radius: var(--radius-s);
-    border: 1px solid var(--background-modifier-border);
-    background: var(--background-primary);
-}
-
-.domain-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--font-ui-small);
-    table-layout: auto;
-}
-
-.domain-table thead {
-    background: var(--background-secondary);
-    border-bottom: 2px solid var(--background-modifier-border);
-}
-
-.domain-table th {
-    padding: 12px 16px;
-    text-align: left;
-    font-weight: var(--font-semibold);
-    color: var(--text-normal);
-    border-right: 1px solid var(--background-modifier-border);
-}
-
-.domain-table th:last-child {
-    border-right: none;
-}
-
-.domain-table td {
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--background-modifier-border);
-    border-right: 1px solid var(--background-modifier-border);
-    vertical-align: top;
-}
-
-.domain-table td:last-child {
-    border-right: none;
-}
-
-.domain-table tbody tr:hover {
-    background: var(--background-modifier-hover);
-}
-
-.domain-table tbody tr:last-child td {
-    border-bottom: none;
-}
-
-.domain-name {
-    font-weight: var(--font-medium);
-    color: var(--text-normal);
-}
-
-.note-count {
-    font-weight: var(--font-semibold);
-    color: var(--text-accent);
-    text-align: center;
-}
-
-.centrality-score {
-    font-family: var(--font-monospace);
-    color: var(--text-muted);
-    text-align: center;
-}
-
-.keywords-cell {
-    max-width: 200px;
-}
-
-.keyword-tag {
-    display: inline-block;
-    background: var(--background-modifier-border);
-    color: var(--text-muted);
-    padding: 2px 6px;
-    border-radius: var(--radius-xs);
-    font-size: var(--font-ui-smaller);
-    margin-right: 4px;
-    margin-bottom: 2px;
-}
-
 /* Sunburst Chart Styles */
 .domain-sunburst-chart {
     background: transparent;
@@ -251,24 +168,6 @@
         min-height: 200px; /* Even smaller on very small screens */
     }
 
-    .domain-table {
-        font-size: var(--font-ui-smaller);
-    }
-
-    .domain-table th,
-    .domain-table td {
-        padding: 8px 10px;
-    }
-
-    .keywords-cell {
-        max-width: 120px;
-    }
-
-    .keyword-tag {
-        font-size: 9px;
-        padding: 1px 4px;
-    }
-
     .domain-sunburst-chart {
         width: 100% !important;
         height: auto !important;
@@ -280,72 +179,33 @@
     }
 }
 
-/* Loading states */
-.domain-chart-loading {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 40px;
-    color: var(--text-muted);
+/* Responsive Design Enhancements */
+@media (prefers-reduced-motion: reduce) {
+    .domain-sunburst-chart path,
+    .domain-pie-chart .arc {
+        transition: none;
+    }
 }
 
-.domain-chart-loading::after {
-    content: '';
-    width: 20px;
-    height: 20px;
-    border: 2px solid var(--background-modifier-border);
-    border-top: 2px solid var(--text-accent);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-    margin-top: 10px;
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    .domain-chart-placeholder {
+        border-width: 2px;
+    }
+    
+    .domain-sunburst-chart path {
+        stroke-width: 2px;
+    }
 }
 
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+/* Dark mode specific adjustments */
+.theme-dark .domain-sunburst-chart {
+    --chart-background: var(--background-secondary);
 }
 
-/* Error states */
-.domain-chart-error {
-    padding: 20px;
-    text-align: center;
-    color: var(--text-error);
-    background: var(--background-secondary);
-    border-radius: var(--radius-m);
-    border: 1px solid var(--background-modifier-border);
-}
-
-.domain-chart-error h4 {
-    margin: 0 0 10px 0;
-    color: var(--text-error);
-}
-
-.domain-chart-error p {
-    margin: 0;
-    color: var(--text-muted);
-    font-size: var(--font-ui-small);
-}
-
-/* Theme consistency and responsiveness */
-.domain-sunburst-chart path {
-    transition: fill 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease, filter 0.2s ease;
-}
-
-.theme-dark .domain-sunburst-chart path {
-    filter: brightness(0.9);
-}
-
-.theme-dark .domain-sunburst-chart path:hover {
-    filter: brightness(1.1);
-}
-
-.theme-light .domain-sunburst-chart path {
-    filter: brightness(1.0);
-}
-
-.theme-light .domain-sunburst-chart path:hover {
-    filter: brightness(1.15);
+/* Light mode specific adjustments */
+.theme-light .domain-sunburst-chart {
+    --chart-background: var(--background-primary);
 }
 
 /* Ensure proper accent color inheritance */
@@ -354,17 +214,6 @@
     --chart-background: var(--background-primary);
     --chart-text: var(--text-normal);
     --chart-muted: var(--text-muted);
-}
-
-/* Accessibility improvements */
-.domain-table th,
-.domain-table td {
-    position: relative;
-}
-
-.domain-table tr:focus-within {
-    outline: 2px solid var(--text-accent);
-    outline-offset: -2px;
 }
 
 /* Print styles */

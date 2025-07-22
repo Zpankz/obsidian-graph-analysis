@@ -11,7 +11,6 @@ import {
 import { KnowledgeEvolutionData } from '../ai/visualization/KnowledgeEvolutionManager';
 import { KnowledgeStructureManager } from '../ai/visualization/KnowledgeStructureManager';
 import { GraphAnalysisSettings } from '../types/types';
-import { DomainDistributionChart } from '../components/domain-distribution/DomainDistributionChart';
 
 // Import type for the manager
 export interface VaultSemanticAnalysisManager {
@@ -458,8 +457,13 @@ export class VaultAnalysisModal extends Modal {
             this.structureAnalysisData = null;
         }
         
-        // ALWAYS display domain distribution chart if vault analysis data exists
-        await this.displayDomainDistributionChart(domainDistributionSection);
+        // Initialize knowledge structure manager if not already done
+        if (!this.knowledgeStructureManager) {
+            this.knowledgeStructureManager = new KnowledgeStructureManager(this.app, this.settings, this.createEmptyState.bind(this));
+        }
+        
+        // ALWAYS display domain distribution chart using KnowledgeStructureManager
+        await this.knowledgeStructureManager.createDomainDistributionChart(domainDistributionSection);
         
         // For the other sections, check if we have cached structure analysis data
         if (this.structureAnalysisData?.knowledgeStructure) {
@@ -476,53 +480,6 @@ export class VaultAnalysisModal extends Modal {
             
             // Show Generate Analysis button for the AI-powered parts
             await this.createAnalysisButtonSection(structureContainer, 'structure');
-        }
-    }
-    
-    /**
-     * Display domain distribution chart using vault analysis data directly
-     */
-    private async displayDomainDistributionChart(container: HTMLElement): Promise<void> {
-        try {
-            // Create chart container with proper sizing
-            const chartContainer = container.createEl('div', { 
-                cls: 'domain-chart-container'
-            });
-            
-            // Create domain chart instance
-            const domainChart = new DomainDistributionChart(
-                this.app,
-                this.settings,
-                chartContainer,
-                {
-                    chartType: 'sunburst',
-                    showTooltips: true,
-                    showLabels: true
-                }
-            );
-            
-            // Load data from cached vault analysis
-            const chartData = await domainChart.loadCachedData();
-            
-            if (chartData) {
-                await domainChart.renderWithData(chartData);
-            } else {
-                // Show placeholder if no chart data could be built
-                const placeholder = container.createEl('div', { 
-                    cls: 'vault-analysis-placeholder' 
-                });
-                placeholder.createEl('p', {
-                    text: 'No domain hierarchy data available. Please generate vault analysis with hierarchical domain structure.',
-                    cls: 'analysis-required'
-                });
-            }
-        } catch (error) {
-            console.error('Error displaying domain distribution chart:', error);
-            const errorMsg = container.createEl('div', { cls: 'error-message' });
-            errorMsg.createEl('p', {
-                text: `Failed to display domain chart: ${error.message}`,
-                cls: 'error-text'
-            });
         }
     }
     
@@ -923,10 +880,10 @@ export class VaultAnalysisModal extends Modal {
 
         try {
             // Ensure DDC template is loaded before proceeding
-            const templateLoaded = await this.masterAnalysisManager.ensureDDCTemplateLoaded();
-            if (!templateLoaded) {
-                throw new Error('Failed to load DDC template. Please ensure the plugin is correctly installed.');
-            }
+            // const templateLoaded = await this.masterAnalysisManager.ensureDDCTemplateLoaded();
+            // if (!templateLoaded) {
+            //     throw new Error('Failed to load DDC template. Please ensure the plugin is correctly installed.');
+            // }
             
             // Generate analysis based on tab name or all analyses
             if (tabName === 'structure') {

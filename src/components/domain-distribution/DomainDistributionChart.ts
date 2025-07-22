@@ -1,7 +1,6 @@
 import { App } from 'obsidian';
 import { GraphAnalysisSettings, HierarchicalDomain, DomainConnection } from '../../types/types';
 import * as d3 from 'd3';
-import { VaultAnalysisResult, MasterAnalysisManager, VaultAnalysisData } from '../../ai/MasterAnalysisManager';
 
 export interface DomainData {
     domain: string;
@@ -20,7 +19,7 @@ export interface DomainDistributionData {
 }
 
 export interface DomainChartOptions {
-    chartType?: 'sunburst' | 'table';
+    chartType?: 'sunburst';
     width?: number;
     height?: number;
     showTooltips?: boolean;
@@ -48,7 +47,6 @@ export class DomainDistributionChart {
     private container: HTMLElement;
     private data: DomainDistributionData | null = null;
     private options: DomainChartOptions;
-    private masterAnalysisManager: MasterAnalysisManager;
 
     constructor(
         app: App, 
@@ -65,7 +63,6 @@ export class DomainDistributionChart {
             showLabels: true,
             ...options
         };
-        this.masterAnalysisManager = new MasterAnalysisManager(app, settings);
 
         // Listen for theme or accent color changes and refresh chart
         // Use multiple methods to detect theme changes
@@ -88,7 +85,7 @@ export class DomainDistributionChart {
             workspace.addEventListener('css-change', this._themeChangeHandler);
         }
 
-                         // Method 2: Listen for theme class changes on body (only theme-related changes)
+        // Method 2: Listen for theme class changes on body (only theme-related changes)
         this._themeObserver = new MutationObserver((mutations) => {
             for (const mutation of mutations) {
                 if (mutation.type === 'attributes' && 
@@ -154,88 +151,9 @@ export class DomainDistributionChart {
             clearTimeout(this._themeChangeTimeout);
         }
     }
-
-    public async loadCachedData(): Promise<DomainDistributionData | null> {
-        try {
-            // First try to load from the new structure-specific analysis file
-            try {
-                const structureFilePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/responses/structure-analysis.json`;
-                const structureContent = await this.app.vault.adapter.read(structureFilePath);
-                const structureData = JSON.parse(structureContent);
-                
-                if (structureData?.knowledgeStructure?.domainHierarchy) {
-                    return {
-                        domainHierarchy: structureData.knowledgeStructure.domainHierarchy,
-                        domainConnections: structureData.knowledgeStructure.domainConnections
-                    };
-                }
-            } catch (structureError) {
-                // Try other methods if structure-specific analysis not found
-            }
-            
-            // Then try to load from the master analysis file (legacy approach)
-            try {
-                const masterFilePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/master-analysis.json`;
-                const masterContent = await this.app.vault.adapter.read(masterFilePath);
-                const masterData = JSON.parse(masterContent);
-                
-                if (masterData?.knowledgeStructure?.domainHierarchy) {
-                    return {
-                        domainHierarchy: masterData.knowledgeStructure.domainHierarchy,
-                        domainConnections: masterData.knowledgeStructure.domainConnections
-                    };
-                }
-            } catch (masterError) {
-                // Try building from vault analysis if master analysis not found
-            }
-            
-            // Finally, try to build directly from vault analysis data (new approach)
-            return await this.buildHierarchyFromVaultAnalysis();
-        } catch (error) {
-            console.warn('No cached domain distribution data found:', error);
-            return null;
-        }
-    }
-    
-    /**
-     * Build domain hierarchy directly from vault analysis data
-     * This is the new approach that doesn't rely on AI to build the hierarchy
-     */
-    private async buildHierarchyFromVaultAnalysis(): Promise<DomainDistributionData | null> {
-        try {
-            // Load vault analysis data
-            const filePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/vault-analysis.json`;
-            const content = await this.app.vault.adapter.read(filePath);
-            const vaultData = JSON.parse(content) as VaultAnalysisData;
-            
-            if (!vaultData?.results || vaultData.results.length === 0) {
-                return null;
-            }
-            
-            // Ensure DDC template is loaded in MasterAnalysisManager
-            await this.masterAnalysisManager.ensureDDCTemplateLoaded();
-            
-            // Use MasterAnalysisManager's implementation to build the hierarchy
-            const domainHierarchy = this.masterAnalysisManager.buildHierarchyFromVaultData(vaultData);
-            
-            return {
-                domainHierarchy,
-                domainConnections: []
-            };
-        } catch (error) {
-            console.error('Failed to build hierarchy from vault analysis:', error);
-            return null;
-        }
-    }
-    
-    // Remove the redundant helper methods as they're now in MasterAnalysisManager
     
     public async render(): Promise<void> {
         this.container.empty();
-        
-        if (!this.data) {
-            await this.loadData();
-        }
         
         if (!this.data || !this.data.domainHierarchy || this.data.domainHierarchy.length === 0) {
             this.renderPlaceholder();
@@ -245,19 +163,8 @@ export class DomainDistributionChart {
         // Create chart container with proper CSS class for responsive sizing
         const chartContainer = this.container.createEl('div', { cls: 'domain-chart-container' });
 
-        switch (this.options.chartType) {
-            case 'table':
-                this.renderTable(chartContainer);
-                break;
-            case 'sunburst':
-            default:
-                this.renderSunburstChart(chartContainer);
-                break;
-        }
-    }
-
-    private async loadData(): Promise<void> {
-        this.data = await this.loadCachedData();
+        // Render sunburst chart
+        this.renderSunburstChart(chartContainer);
     }
 
     private renderPlaceholder(): void {
@@ -267,81 +174,10 @@ export class DomainDistributionChart {
                 <div class="placeholder-icon">📊</div>
                 <div class="placeholder-title">No Domain Hierarchy Available</div>
                 <div class="placeholder-text">
-                    Please generate vault analysis with optimized DDC section classification to see four-layer domain distribution.
+                    Please generate vault analysis with optimized DDC section classification to see domain distribution.
                 </div>
             </div>
         `;
-    }
-
-    private renderTable(container: HTMLElement = this.container): void {
-        const tableContainer = container.createEl('div', { cls: 'domain-table-container' });
-        
-        const table = tableContainer.createEl('table', { cls: 'domain-table' });
-        const thead = table.createEl('thead');
-        const tbody = table.createEl('tbody');
-
-        // Create header
-        const headerRow = thead.createEl('tr');
-        headerRow.createEl('th', { text: 'DDC Code' });
-        headerRow.createEl('th', { text: 'Domain' });
-        headerRow.createEl('th', { text: 'Level' });
-        headerRow.createEl('th', { text: 'Notes' });
-        headerRow.createEl('th', { text: 'Centrality' });
-
-        // Flatten hierarchy for table display
-        const flattenHierarchy = (nodes: HierarchicalDomain[], level: number = 1): Array<HierarchicalDomain & {level: number}> => {
-            const result: Array<HierarchicalDomain & {level: number}> = [];
-            for (const node of nodes) {
-                result.push({ ...node, level });
-                if (node.children) {
-                    result.push(...flattenHierarchy(node.children, level + 1));
-                }
-            }
-            return result;
-        };
-
-        const flatDomains = flattenHierarchy(this.data!.domainHierarchy);
-
-        // Create rows
-        flatDomains
-            .filter(domain => domain.noteCount > 0)
-            .forEach(domain => {
-                const row = tbody.createEl('tr');
-                row.addClass(`level-${domain.level}`);
-                
-                // DDC Code
-                row.createEl('td', { 
-                    text: domain.ddcCode || '-',
-                    cls: 'ddc-code'
-                });
-                
-                // Domain name with indentation
-                const domainCell = row.createEl('td');
-                const indent = '  '.repeat(domain.level - 1);
-                domainCell.createEl('span', { 
-                    text: `${indent}${domain.name}`,
-                    cls: 'domain-name'
-                });
-                
-                // Level
-                const levelNames = { 1: 'Class', 2: 'Section' };
-                row.createEl('td', { 
-                    text: levelNames[domain.level as keyof typeof levelNames] || `Level ${domain.level}`,
-                    cls: 'level-name'
-                });
-                
-                // Note count
-                row.createEl('td', { 
-                    text: domain.noteCount.toString(),
-                    cls: 'note-count'
-                });
-                
-                // Centrality
-                row.createEl('td', { 
-                    text: domain.avgCentrality?.toFixed(3) || '-',
-                    cls: 'centrality-score'
-                });
-            });
     }
 
     private renderSunburstChart(container: HTMLElement = this.container): void {

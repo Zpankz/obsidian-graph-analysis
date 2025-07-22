@@ -1,4 +1,4 @@
-import { requestUrl } from 'obsidian';
+import { GoogleGenAI } from '@google/genai';
 import { GraphAnalysisSettings } from '../types/types';
 
 export interface TokenUsage {
@@ -17,16 +17,30 @@ export interface AIBatchResponse<T = any> {
     tokenUsage: TokenUsage;
 }
 
+// NEW: Add Type import for structured output
+import { Type } from '@google/genai';
+
 export class AIModelService {
     private settings: GraphAnalysisSettings;
     private readonly RATE_LIMIT_DELAY = 2500; // 2.5 seconds between requests for 30 RPM
     private readonly MAX_RETRIES = 3;
+    private genAI: GoogleGenAI | null = null;
     
     // NEW: Track if context is loaded to avoid redundant loading
     private contextLoaded: boolean = false;
 
     constructor(settings: GraphAnalysisSettings) {
         this.settings = settings;
+        this.initializeGenAI();
+    }
+
+    /**
+     * Initialize the Google GenAI client
+     */
+    private initializeGenAI(): void {
+        if (this.settings?.geminiApiKey && this.settings.geminiApiKey.trim() !== '') {
+            this.genAI = new GoogleGenAI({ apiKey: this.settings.geminiApiKey });
+        }
     }
 
     /**
@@ -34,6 +48,7 @@ export class AIModelService {
      */
     public updateSettings(settings: GraphAnalysisSettings): void {
         this.settings = settings;
+        this.initializeGenAI();
     }
     
     /**
@@ -181,6 +196,194 @@ export class AIModelService {
     }
 
     /**
+     * NEW: Structured output analysis using Gemini 2.5 Flash with response schema
+     * This method ensures reliable JSON responses by using the structured output feature
+     */
+    public async generateStructuredAnalysis<T>(
+        prompt: string,
+        responseSchema: any,
+        maxOutputTokens: number = 8000,
+        temperature: number = 0.3,
+        topP: number = 0.72
+    ): Promise<AIResponse<T>> {
+        if (!this.genAI) {
+            throw new Error('Gemini API key not configured. Please configure your API key in settings.');
+        }
+
+        console.log(`Sending structured analysis request to Gemini 2.5 Flash (max tokens: ${maxOutputTokens})...`);
+        console.log(`STRUCTURED PROMPT (${prompt.length} chars):`);
+        console.log(prompt);
+
+        try {
+            const response = await this.genAI.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: prompt,
+                config: {
+                    responseMimeType: 'application/json',
+                    responseSchema,
+                    thinkingConfig: {
+                        thinkingBudget: 0, // Disables thinking for faster responses
+                    },
+                    temperature,
+                    topP,
+                    // maxOutputTokens
+                }
+            });
+
+            // Extract token usage from the response
+            const tokenUsage: TokenUsage = {
+                promptTokens: response.usageMetadata?.promptTokenCount || 0,
+                candidatesTokens: response.usageMetadata?.candidatesTokenCount || 0,
+                totalTokens: response.usageMetadata?.totalTokenCount || 0
+            };
+
+            const result = response.text?.trim() || '';
+            
+            if (!result) {
+                throw new Error('Empty response from Gemini API');
+            }
+            
+            // Parse the JSON response since it's guaranteed to be valid JSON
+            let parsedResult: T;
+            try {
+                parsedResult = JSON.parse(result) as T;
+            } catch (parseError) {
+                console.error('Failed to parse structured response as JSON:', parseError);
+                throw new Error(`Failed to parse structured response: ${(parseError as Error).message}`);
+            }
+
+            console.log(`STRUCTURED RESPONSE SUCCESS (${result.length} chars, tokens: ${tokenUsage.totalTokens})`);
+            console.log('Parsed result:', parsedResult);
+
+            return {
+                result: parsedResult,
+                tokenUsage
+            };
+
+        } catch (error) {
+            console.error('Gemini 2.5 Flash structured API error:', error);
+            
+            const errorMessage = (error as Error).message;
+            if (errorMessage.includes('429')) {
+                // Handle rate limiting
+                const waitTime = Math.max(this.RATE_LIMIT_DELAY, 5000);
+                console.log(`Rate limited. Retrying in ${waitTime/1000} seconds...`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                return this.generateStructuredAnalysis(prompt, responseSchema, maxOutputTokens, temperature, topP);
+            }
+            
+            throw error;
+        }
+    }
+
+    /**
+     * NEW: Create response schema for knowledge network analysis
+     * This matches the schema used in the test code
+     */
+    public createKnowledgeNetworkSchema(): any {
+        return {
+            type: Type.OBJECT,
+            properties: {
+                knowledgeNetwork: {
+                    type: Type.OBJECT,
+                    properties: {
+                        bridges: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    domain: { type: Type.STRING },
+                                    explanation: { type: Type.STRING },
+                                    topNotes: {
+                                        type: Type.ARRAY,
+                                        items: {
+                                            type: Type.OBJECT,
+                                            properties: {
+                                                title: { type: Type.STRING },
+                                                path: { type: Type.STRING },
+                                                rank: { type: Type.NUMBER }
+                                            },
+                                            propertyOrdering: ["title", "path", "rank"]
+                                        }
+                                    },
+                                    connections: {
+                                        type: Type.ARRAY,
+                                        items: { type: Type.STRING }
+                                    },
+                                    insights: { type: Type.STRING }
+                                },
+                                propertyOrdering: ["domain", "explanation", "topNotes", "connections", "insights"]
+                            }
+                        },
+                        foundations: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    domain: { type: Type.STRING },
+                                    explanation: { type: Type.STRING },
+                                    topNotes: {
+                                        type: Type.ARRAY,
+                                        items: {
+                                            type: Type.OBJECT,
+                                            properties: {
+                                                title: { type: Type.STRING },
+                                                path: { type: Type.STRING },
+                                                rank: { type: Type.NUMBER }
+                                            },
+                                            propertyOrdering: ["title", "path", "rank"]
+                                        }
+                                    },
+                                    coverage: {
+                                        type: Type.ARRAY,
+                                        items: { type: Type.STRING }
+                                    },
+                                    insights: { type: Type.STRING }
+                                },
+                                propertyOrdering: ["domain", "explanation", "topNotes", "coverage", "insights"]
+                            }
+                        },
+                        authorities: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    domain: { type: Type.STRING },
+                                    explanation: { type: Type.STRING },
+                                    topNotes: {
+                                        type: Type.ARRAY,
+                                        items: {
+                                            type: Type.OBJECT,
+                                            properties: {
+                                                title: { type: Type.STRING },
+                                                path: { type: Type.STRING },
+                                                rank: { type: Type.NUMBER }
+                                            },
+                                            propertyOrdering: ["title", "path", "rank"]
+                                        }
+                                    },
+                                    influence: {
+                                        type: Type.ARRAY,
+                                        items: { type: Type.STRING }
+                                    },
+                                    insights: { type: Type.STRING }
+                                },
+                                propertyOrdering: ["domain", "explanation", "topNotes", "influence", "insights"]
+                            }
+                        }
+                    },
+                    propertyOrdering: ["bridges", "foundations", "authorities"]
+                },
+                knowledgeGaps: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                }
+            },
+            propertyOrdering: ["knowledgeNetwork", "knowledgeGaps"]
+        };
+    }
+
+    /**
      * Batch analysis request for multiple items
      */
     public async generateBatchAnalysis<T>(
@@ -209,17 +412,23 @@ export class AIModelService {
         }
     }
 
+
+
+
+    
+
+
     /**
-     * Core API call method for Gemini 2.0 Flash-Lite
+     * Core API call method for Gemini 2.5 Flash using SDK
      */
     private async callGeminiFlashLite(
         prompt: string, 
-        maxOutputTokens: number = 8000,
-        temperature: number = 0.3,
+        maxOutputTokens: number = 12000,
+        temperature: number = 0.9,
         retryCount: number = 0,
         stageLabel: string = "API Call" // Default label
     ): Promise<AIResponse> {
-        if (!this.settings?.geminiApiKey || this.settings.geminiApiKey.trim() === '') {
+        if (!this.genAI) {
             throw new Error('Gemini API key not configured. Please configure your API key in settings.');
         }
 
@@ -227,51 +436,28 @@ export class AIModelService {
         console.log(`${stageLabel} - COMPLETE PROMPT (${prompt.length} chars, max tokens: ${maxOutputTokens}):`);
         console.log(prompt);
 
-        const apiKey = this.settings.geminiApiKey;
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-
-        const requestBody = { 
-            contents: [{
-                parts: [{
-                    text: prompt
-                }]
-            }],
-            generationConfig: {
-                temperature,
-                topK: 20,
-                topP: 0.8,
-                maxOutputTokens,
-            }
-        };
-
         try {
-            const response = await requestUrl({
-                url: url,
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(requestBody)
+            const response = await this.genAI.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: prompt,
+                config: {
+                    temperature,
+                    maxOutputTokens,
+                }
             });
-
-            if (response.status !== 200) {
-                return this.handleAPIError(response, prompt, maxOutputTokens, temperature, retryCount, stageLabel);
-            }
-
-            const data = response.json;
-            
-            if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
-                throw new Error('Invalid response format from Gemini API');
-            }
 
             // Extract token usage from the response
             const tokenUsage: TokenUsage = {
-                promptTokens: data.usageMetadata?.promptTokenCount || 0,
-                candidatesTokens: data.usageMetadata?.candidatesTokenCount || 0,
-                totalTokens: data.usageMetadata?.totalTokenCount || 0
+                promptTokens: response.usageMetadata?.promptTokenCount || 0,
+                candidatesTokens: response.usageMetadata?.candidatesTokenCount || 0,
+                totalTokens: response.usageMetadata?.totalTokenCount || 0
             };
 
-            const result = data.candidates[0].content.parts[0].text.trim();
+            const result = response.text?.trim() || '';
+            
+            if (!result) {
+                throw new Error('Empty response from Gemini API');
+            }
             
             // Log complete response for debugging
             console.log(`${stageLabel} - COMPLETE RESPONSE (${result.length} chars, tokens: ${tokenUsage.totalTokens}):`);
@@ -283,10 +469,10 @@ export class AIModelService {
             };
 
         } catch (error) {
-            console.error(`${stageLabel} - Gemini 2.0 Flash-Lite API error:`, error);
+            console.error(`${stageLabel} - Gemini 2.5 Flash API error:`, error);
             
             const errorMessage = (error as Error).message;
-            if (errorMessage.includes('status 429') && retryCount < this.MAX_RETRIES) {
+            if (errorMessage.includes('429') && retryCount < this.MAX_RETRIES) {
                 return this.handleRateLimit(prompt, maxOutputTokens, temperature, retryCount, stageLabel);
             }
             
@@ -296,34 +482,6 @@ export class AIModelService {
             }
             
             throw error;
-        }
-    }
-
-    /**
-     * Handle API error responses
-     */
-    private async handleAPIError(
-        response: any,
-        prompt: string,
-        maxOutputTokens: number,
-        temperature: number,
-        retryCount: number,
-        stageLabel: string = "API Call"
-    ): Promise<AIResponse> {
-        // Handle rate limiting for 30 RPM limit
-        if (response.status === 429 && retryCount < this.MAX_RETRIES) {
-            return this.handleRateLimit(prompt, maxOutputTokens, temperature, retryCount, stageLabel);
-        }
-        
-        // Provide user-friendly error messages
-        if (response.status === 429) {
-            throw new Error('Rate limit exceeded. Please wait a few minutes before trying again.');
-        } else if (response.status === 400) {
-            throw new Error('Invalid request. Please check your API key or try again.');
-        } else if (response.status === 403) {
-            throw new Error('API access forbidden. Please check your Gemini API key permissions.');
-        } else {
-            throw new Error(`Gemini API returned status ${response.status}: ${response.text}`);
         }
     }
 
@@ -366,7 +524,7 @@ export class AIModelService {
      */
     private isAPIError(errorMessage: string): boolean {
         return errorMessage.includes('Rate limit') || 
-               errorMessage.includes('status 429') || 
+               errorMessage.includes('429') || 
                errorMessage.includes('API') ||
                errorMessage.includes('Invalid response format');
     }
