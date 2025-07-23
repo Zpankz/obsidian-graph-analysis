@@ -1,7 +1,7 @@
 import { App, Notice, TFile } from 'obsidian';
-import { GraphAnalysisSettings, HierarchicalDomain, DomainConnection } from '../types/types';
+import { GraphAnalysisSettings, HierarchicalDomain } from '../types/types';
 import { AIModelService, TokenUsage } from '../services/AIModelService';
-import { KnowledgeStructureData, NetworkNode } from './visualization/KnowledgeStructureManager';
+import { KnowledgeStructureData } from './visualization/KnowledgeStructureManager';
 import { 
     KnowledgeEvolutionData,
     TimelineAnalysis,
@@ -11,8 +11,8 @@ import {
     EvolutionInsight
 } from './visualization/KnowledgeEvolutionManager';
 import { KnowledgeActionsData } from './visualization/KnowledgeActionsManager';
+import { DDCHelper, DDCClass, DDCSectionListItem } from './DDCHelper';
 
-// Remove re-export since we now import directly from types.ts
 
 export interface VaultAnalysisResult {
     id: string;
@@ -47,25 +47,6 @@ export interface VaultAnalysisData {
     results: VaultAnalysisResult[];
 }
 
-/**
- * @deprecated Use tab-specific analysis data interfaces (StructureAnalysisData, EvolutionAnalysisData, ActionsAnalysisData) instead.
- */
-export interface MasterAnalysisData {
-    generatedAt: string;
-    sourceAnalysisId: string; // Reference to vault-analysis.json used
-    apiProvider: string;
-    tokenUsage: TokenUsage;
-    // rawAIResponse field removed as it's no longer needed
-    
-    // Tab 2: Knowledge Structure
-    knowledgeStructure: KnowledgeStructureData;
-    
-    // Tab 3: Knowledge Evolution  
-    knowledgeEvolution: KnowledgeEvolutionData;
-    
-    // Tab 4: Recommended Actions
-    recommendedActions: KnowledgeActionsData;
-}
 
 // NEW: Interface for tab-specific analysis data
 export interface TabAnalysisData {
@@ -91,141 +72,26 @@ export interface ActionsAnalysisData extends TabAnalysisData {
 }
 
 // DDC Template interfaces - UPDATED for new structured ID system
-interface DDCSection {
-    id: string;
-    name: string;
-}
-
-interface DDCDivision {
-    id: string;
-    name: string;
-    sections: DDCSection[];
-}
-
-interface DDCClass {
-    id: string;
-    name: string;
-    divisions: DDCDivision[];
-}
-
-interface DDCTemplate {
-    ddc_23_summaries: {
-        title: string;
-        classes: DDCClass[];
-    };
-}
 
 export class MasterAnalysisManager {
     private app: App;
     private settings: GraphAnalysisSettings;
     private aiService: AIModelService;
-    
-    // DDC data loaded from external JSON file - UPDATED for new structure
-    private ddcTemplate: DDCTemplate | null = null;
-    private ddcMainClasses: { [key: string]: string } = {};
-    private ddcDivisions: { [key: string]: string } = {};
-    private ddcSections: { [key: string]: string } = {};
-    
-    // NEW: Optimized section list for AI classification
-    private ddcSectionsList: Array<{id: string, name: string, division: string, mainClass: string}> = [];
+    private ddcHelper: DDCHelper;
 
     constructor(app: App, settings: GraphAnalysisSettings) {
         this.app = app;
         this.settings = settings;
         this.aiService = new AIModelService(settings);
+        this.ddcHelper = DDCHelper.getInstance(app);
     }
 
-    /**
-     * NEW: Helper function to get all section-level domains (third level)
-     */
-    public getAllDDCSections(): Array<{id: string, name: string, division: string, mainClass: string}> {
-        return this.ddcSectionsList;
+    public getAllDDCSections(): DDCSectionListItem[] {
+        return this.ddcHelper.getAllDDCSections();
     }
 
-    /**
-     * Load DDC template from external JSON file and extract optimized section list
-     */
     private async loadDDCTemplate(): Promise<void> {
-        if (this.ddcTemplate) {
-            console.log('DDC template already loaded, skipping load');
-            return; // Already loaded
-        }
-
-        try {
-            // Check if template exists in plugin root directory
-            const templatePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/DDC-template.json`;
-            console.log('Attempting to load DDC template from:', templatePath);
-            
-            let ddcContent: string | null = null;
-            
-            try {
-                ddcContent = await this.app.vault.adapter.read(templatePath);
-                console.log(`Successfully loaded DDC template from: ${templatePath}`);
-            } catch (pathError) {
-                console.log(`DDC template not found at: ${templatePath}`);
-                throw new Error('DDC template not found in the plugin directory. Please ensure the DDC-template.json file is properly copied to the plugin directory during installation.');
-            }
-            
-            try {
-                this.ddcTemplate = JSON.parse(ddcContent);
-                console.log('Successfully parsed DDC template JSON');
-            } catch (parseError) {
-                console.error('Failed to parse DDC template JSON:', parseError);
-                console.log('DDC content preview:', ddcContent.substring(0, 200) + '...');
-                throw new Error(`Failed to parse DDC template JSON: ${parseError.message}`);
-            }
-            
-            // Extract classes, divisions, and sections for the new structure
-            this.ddcMainClasses = {};
-            this.ddcDivisions = {};
-            this.ddcSections = {};
-            this.ddcSectionsList = []; // Reset the optimized list
-            
-            if (this.ddcTemplate?.ddc_23_summaries?.classes) {
-                const classCount = this.ddcTemplate.ddc_23_summaries.classes.length;
-                
-                this.ddcTemplate.ddc_23_summaries.classes.forEach(ddcClass => {
-                    // Store main class
-                    this.ddcMainClasses[ddcClass.id] = ddcClass.name;
-                    
-                    // Process divisions
-                    const divisionCount = ddcClass.divisions.length;
-                    
-                    ddcClass.divisions.forEach(division => {
-                        this.ddcDivisions[division.id] = division.name;
-                        
-                        // Process sections and build optimized list
-                        const sectionCount = division.sections.length;
-                        
-                        division.sections.forEach(section => {
-                            this.ddcSections[section.id] = section.name;
-                            
-                            // Add to optimized sections list with parent information
-                            this.ddcSectionsList.push({
-                                id: section.id,
-                                name: section.name,
-                                division: division.name,
-                                mainClass: ddcClass.name
-                            });
-                        });
-                    });
-                });
-                
-                console.log(`📚 DDC template loaded from ${templatePath}: ${this.ddcTemplate.ddc_23_summaries.classes.length} main classes, ${Object.keys(this.ddcDivisions).length} divisions, ${Object.keys(this.ddcSections).length} sections`);
-                console.log(`🎯 Optimized sections list: ${this.ddcSectionsList.length} leaf nodes for AI classification`);
-            } else {
-                console.error('DDC template has invalid structure:', this.ddcTemplate);
-                throw new Error('DDC template has invalid structure. Expected ddc_23_summaries.classes array.');
-            }
-        } catch (error) {
-            console.error('Failed to load DDC template:', error);
-            // Fallback to empty structure
-            this.ddcTemplate = null;
-            this.ddcMainClasses = {};
-            this.ddcDivisions = {};
-            this.ddcSections = {};
-            this.ddcSectionsList = [];
-        }
+        await this.ddcHelper.loadDDCTemplate();
     }
 
     // NEW: Ensure responses directory exists
@@ -367,11 +233,12 @@ export class MasterAnalysisManager {
         
         // Get DDC name to code mapping for reverse lookup
         const nameToCodeMap = new Map<string, string>();
-        const codeToNameMap = this.getDDCCodeToNameMap();
+        const codeToNameMap = this.ddcHelper.getDDCCodeToNameMap();
         
         // Add main class names to the code-to-name map
-        if (this.ddcTemplate && this.ddcTemplate.ddc_23_summaries && this.ddcTemplate.ddc_23_summaries.classes) {
-            this.ddcTemplate.ddc_23_summaries.classes.forEach(cls => {
+        const ddcTemplate = this.ddcHelper.getDDCTemplate();
+        if (ddcTemplate && ddcTemplate.ddc_23_summaries && ddcTemplate.ddc_23_summaries.classes) {
+            ddcTemplate.ddc_23_summaries.classes.forEach((cls: DDCClass) => {
                 // Store main class names with their IDs (0, 1, 2, etc.)
                 codeToNameMap.set(cls.id, cls.name);
             });
@@ -389,7 +256,7 @@ export class MasterAnalysisManager {
                 note.knowledgeDomains.forEach(domain => {
                     let sectionId = '';
                     // Try to use domain as a DDC code first
-                    if (this.isValidDDCSectionId(domain)) {
+                    if (this.ddcHelper.isValidDDCSectionId(domain)) {
                         sectionId = domain;
                     } 
                     // If not a valid code, try to look up by name
@@ -404,7 +271,7 @@ export class MasterAnalysisManager {
                     // Skip if we couldn't determine a section ID
                     if (!sectionId) return;
                     // Get class ID from section ID
-                    const classId = this.getClassIdFromSection(sectionId);
+                    const classId = this.ddcHelper.getClassIdFromSection(sectionId);
                     // Update section counts
                     sectionCounts.set(sectionId, (sectionCounts.get(sectionId) || 0) + 1);
                     // Update section notes
@@ -482,20 +349,6 @@ export class MasterAnalysisManager {
         return result;
     }
 
-    /**
-     * Helper methods to extract IDs from section IDs - UPDATED for new structured ID system
-     */
-    private getClassIdFromSection(sectionId: string): string {
-        // Extract class ID from section ID (e.g., "0-0-0" -> "0")
-        return sectionId.split('-')[0];
-    }
-
-    private getDivisionIdFromSection(sectionId: string): string {
-        // Extract division ID from section ID (e.g., "0-0-0" -> "0-0")
-        const parts = sectionId.split('-');
-        return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : sectionId;
-    }
-
     public updateSettings(settings: GraphAnalysisSettings): void {
         this.settings = settings;
         this.aiService.updateSettings(settings);
@@ -503,108 +356,8 @@ export class MasterAnalysisManager {
 
  
     /**
-     * Check if a section ID is valid in the DDC template
+     * NEW: Generate Knowledge Structure Analysis using structured output
      */
-    private isValidDDCSectionId(sectionId: string): boolean {
-        // First check if it's in our loaded sections list
-        if (this.ddcSections[sectionId]) {
-            return true;
-        }
-        
-        // Try to normalize the section ID format
-        let normalizedId = sectionId;
-        
-        // Handle formats like "004" or "4" instead of "0-0-4"
-        if (!sectionId.includes('-')) {
-            // Try to convert numeric format to DDC format
-            if (sectionId.length === 3) {
-                // Format like "004" -> "0-0-4"
-                normalizedId = `${sectionId[0]}-${sectionId[1]}-${sectionId[2]}`;
-            } else if (sectionId.length === 1) {
-                // Format like "4" -> "0-0-4" (assuming it's in the first division)
-                normalizedId = `0-0-${sectionId}`;
-            }
-        }
-        
-        // Check if normalized ID is valid
-        if (this.ddcSections[normalizedId]) {
-            console.log(`Normalized section ID ${sectionId} to ${normalizedId}`);
-            return true;
-        }
-        
-        // If still not found, try to match by extracting numbers
-        const numbers = sectionId.match(/\d+/g);
-        if (numbers && numbers.length === 3) {
-            const constructed = `${numbers[0]}-${numbers[1]}-${numbers[2]}`;
-            if (this.ddcSections[constructed]) {
-                console.log(`Constructed valid section ID ${constructed} from ${sectionId}`);
-                return true;
-            }
-        }
-        
-        return false;
-    }
-
-    /**
-     * NEW: Get section information by ID
-     */
-    public getDDCSectionInfo(sectionId: string): {id: string, name: string, division: string, mainClass: string} | null {
-        return this.ddcSectionsList.find(section => section.id === sectionId) || null;
-    }
-
-    /**
-     * NEW: Get all sections within a specific division
-     */
-    public getSectionsInDivision(divisionId: string): Array<{id: string, name: string, division: string, mainClass: string}> {
-        return this.ddcSectionsList.filter(section => 
-            this.getDivisionIdFromSection(section.id) === divisionId
-        );
-    }
-
-    /**
-     * NEW: Get all sections within a specific class
-     */
-    public getSectionsInClass(classId: string): Array<{id: string, name: string, division: string, mainClass: string}> {
-        return this.ddcSectionsList.filter(section => 
-            this.getClassIdFromSection(section.id) === classId
-        );
-    }
-
-    /**
-     * Get a map from DDC section code to section name
-     */
-    public getDDCCodeToNameMap(): Map<string, string> {
-        const map = new Map<string, string>();
-        
-        // Add section names from the sections list
-        this.ddcSectionsList.forEach(section => {
-            map.set(section.id, section.name);
-        });
-        
-        // Add main class names from the DDC template
-        if (this.ddcTemplate && this.ddcTemplate.ddc_23_summaries && this.ddcTemplate.ddc_23_summaries.classes) {
-            this.ddcTemplate.ddc_23_summaries.classes.forEach(cls => {
-                map.set(cls.id, cls.name);
-            });
-        }
-        
-        // Add any manually defined class and division names
-        Object.entries(this.ddcMainClasses).forEach(([code, name]) => {
-            map.set(code, name);
-        });
-        
-        Object.entries(this.ddcDivisions).forEach(([code, name]) => {
-            map.set(code, name);
-        });
-        
-        Object.entries(this.ddcSections).forEach(([code, name]) => {
-            map.set(code, name);
-        });
-        
-        return map;
-    }
-
-    // NEW: Generate Knowledge Structure Analysis using structured output
     public async generateKnowledgeStructureAnalysis(): Promise<StructureAnalysisData> {
         try {
             console.log('Generating Knowledge Structure Analysis with structured output...');
@@ -712,24 +465,6 @@ ${JSON.stringify(analysisData)}`;
             console.log(`${tabName} analysis cached successfully in responses directory`);
         } catch (error) {
             console.error(`Failed to cache ${tabName} analysis:`, error);
-        }
-    }
-
-    /**
-     * Public method to ensure the DDC template is loaded
-     * This can be called from other classes to ensure the template is loaded before using it
-     */
-    public async ensureDDCTemplateLoaded(): Promise<boolean> {
-        if (this.ddcTemplate) {
-            return true; // Already loaded
-        }
-        
-        try {
-            await this.loadDDCTemplate();
-            return this.ddcTemplate !== null;
-        } catch (error) {
-            console.error('Failed to load DDC template:', error);
-            return false;
         }
     }
 
