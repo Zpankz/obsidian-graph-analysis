@@ -197,8 +197,10 @@ export class KnowledgeStructureManager {
             // Create a new MasterAnalysisManager instance for hierarchy building
             const masterAnalysisManager = new MasterAnalysisManager(this.app, this.settings);
             
-            // Ensure DDC template is loaded
-            await masterAnalysisManager.ensureDDCTemplateLoaded();
+            // Ensure DDC template is loaded using DDCHelper
+            const { DDCHelper } = require('../DDCHelper');
+            const ddcHelper = DDCHelper.getInstance(this.app);
+            await ddcHelper.ensureDDCTemplateLoaded();
             
             // Use MasterAnalysisManager's implementation to build the hierarchy
             const domainHierarchy = masterAnalysisManager.buildHierarchyFromVaultData(vaultData);

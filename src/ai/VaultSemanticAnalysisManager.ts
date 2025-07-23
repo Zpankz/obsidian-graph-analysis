@@ -9,6 +9,7 @@ import {
 import { AIModelService, TokenUsage } from '../services/AIModelService';
 import { GraphDataBuilder } from '../components/graph-view/data/graph-builder';
 import { PluginService } from '../services/PluginService';
+import { DDCHelper } from './DDCHelper';
 
 export class VaultSemanticAnalysisManager {
     private app: App;
@@ -39,15 +40,16 @@ export class VaultSemanticAnalysisManager {
         }
 
         try {
-            // Ensure DDC template is loaded in MasterAnalysisManager
-            const loaded = await this.masterAnalysisManager.ensureDDCTemplateLoaded();
+            // Ensure DDC template is loaded using DDCHelper directly
+            const ddcHelper = DDCHelper.getInstance(this.app);
+            const loaded = await ddcHelper.ensureDDCTemplateLoaded();
             if (!loaded) {
-                console.error('Failed to load DDC template from MasterAnalysisManager');
+                console.error('Failed to load DDC template from DDCHelper');
                 return false;
             }
 
             // Get the DDC sections list
-            this.ddcSectionsList = this.masterAnalysisManager.getAllDDCSections();
+            this.ddcSectionsList = ddcHelper.getAllDDCSections();
             this.ddcTemplateLoaded = this.ddcSectionsList.length > 0;
             
             console.log(`📚 DDC template loaded for VaultSemanticAnalysisManager: ${this.ddcSectionsList.length} sections available`);
@@ -356,8 +358,8 @@ export class VaultSemanticAnalysisManager {
                 }
             }
 
-            // Create word-count-based batches with 2.0 Flash-Lite's generous limits
-            const maxWordsPerBatch = 20000; // Target ~20k words per batch (efficient token usage)
+            // Create word-count-based batches with 2.0 Flash's generous limits
+            const maxWordsPerBatch = 5000; // Reduced batch size for debugging (was 20000)
             const delayBetweenBatches = 3000; // 3 seconds between batches for 30 RPM rate limiting
             
             const batches: Array<typeof fileDataList> = [];
@@ -383,7 +385,7 @@ export class VaultSemanticAnalysisManager {
             }
 
             const totalBatches = batches.length;
-            console.log(`Processing ${includedFiles.length} files in ${totalBatches} word-count-based batches using Gemini 2.0 Flash-Lite`);
+            console.log(`Processing ${includedFiles.length} files in ${totalBatches} word-count-based batches using Gemini 2.0 Flash`);
             console.log(`Average batch size: ${Math.round(fileDataList.reduce((sum, f) => sum + f.wordCount, 0) / totalBatches)} words`);
             
             // Process batches sequentially with proper rate limiting
@@ -851,8 +853,10 @@ export class VaultSemanticAnalysisManager {
             // Sort results by title for consistent ordering
             const sortedResults = results.sort((a, b) => a.title.localeCompare(b.title));
 
-            // Build DDC code-to-name map from MasterAnalysisManager
-            const ddcCodeToNameMap = this.masterAnalysisManager.getDDCCodeToNameMap();
+            // Build DDC code-to-name map using DDCHelper directly
+            const ddcHelper = DDCHelper.getInstance(this.app);
+            await ddcHelper.loadDDCTemplate();
+            const ddcCodeToNameMap = ddcHelper.getDDCCodeToNameMap();
 
             // Convert DDC codes to domain names and store as string array
             const enhancedResults = sortedResults.map(result => {
@@ -978,16 +982,6 @@ Classify each note into the most appropriate Dewey Decimal Classification (DDC) 
 ${sectionsJson}
 \`\`\`
 
-Format your response as a JSON array with exactly ${meaningfulFiles.length} objects in this format:
-[
-  {
-    "summary": "Two to three sentence summary",
-    "keywords": "keyword1, keyword2, keyword3",
-    "knowledgeDomain": "0-0-4,1-5-1"
-  },
-  ...
-]
-
 Notes to analyze:
 
 `;
@@ -998,16 +992,29 @@ Notes to analyze:
         });
 
         try {
-            const response = await this.aiService.generateBatchAnalysis<{
+            // Use structured output instead of deprecated generateBatchAnalysis
+            const responseSchema = this.aiService.createVaultSemanticAnalysisSchema(meaningfulFiles.length);
+            
+            // Add debugging info
+            console.log(`Structured analysis: ${meaningfulFiles.length} files, prompt length: ${prompt.length} chars`);
+            console.log('Response schema:', JSON.stringify(responseSchema, null, 2));
+            
+            const response = await this.aiService.generateStructuredAnalysis<Array<{
                 summary: string;
                 keywords: string;
                 knowledgeDomain: string;
-            }>(prompt, meaningfulFiles.length);
+            }>>(
+                prompt,
+                responseSchema,
+                meaningfulFiles.length * 150 + 300, // Calculate appropriate token limit
+                0.2, // Low temperature for consistent results
+                0.72 // Default topP
+            );
 
-            console.log(`Batch analysis completed with DDC classification. Token usage: ${response.tokenUsage.totalTokens} total (${response.tokenUsage.promptTokens} prompt + ${response.tokenUsage.candidatesTokens} response)`);
+            console.log(`Batch analysis completed with DDC classification using structured output. Token usage: ${response.tokenUsage.totalTokens} total (${response.tokenUsage.promptTokens} prompt + ${response.tokenUsage.candidatesTokens} response)`);
 
             return {
-                results: response.results.map(item => ({
+                results: response.result.map(item => ({
                     summary: item.summary || '',
                     keywords: item.keywords || '',
                     knowledgeDomain: item.knowledgeDomain || ''
@@ -1015,17 +1022,93 @@ Notes to analyze:
                 tokenUsage: response.tokenUsage
             };
 
-        } catch (error) {
-            console.error('AI batch analysis error:', error);
-            // Fallback: create default results for each file
-            return {
-                results: meaningfulFiles.map((data) => ({
-                    summary: `Analysis failed for ${data.file.basename}`,
-                    keywords: '',
-                    knowledgeDomain: ''
-                })),
-                tokenUsage: { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 }
-            };
+        } catch (structuredError) {
+            console.error('Structured output batch analysis failed:', structuredError);
+            
+            // Fallback: try with legacy generateAnalysis method for individual files
+            console.log('Attempting fallback to individual file analysis...');
+            try {
+                const fallbackResults: Array<{
+                    summary: string;
+                    keywords: string;
+                    knowledgeDomain: string;
+                }> = [];
+                let fallbackTokenUsage: TokenUsage = { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 };
+                
+                for (const fileData of meaningfulFiles) {
+                    try {
+                        const individualPrompt = `Analyze this note and provide:
+1. A two to three sentence summary of the main concept or purpose (be detailed)
+2. 3-6 key terms or phrases (comma-separated)
+3. DDC classification codes that best match the content (comma-separated)
+
+**DDC Sections Reference**:
+\`\`\`json
+${sectionsJson}
+\`\`\`
+
+Respond in JSON format:
+{
+  "summary": "Two to three sentence summary",
+  "keywords": "keyword1, keyword2, keyword3", 
+  "knowledgeDomain": "0-0-4,1-5-1"
+}
+
+Note: "${fileData.file.basename}" (${fileData.wordCount} words)
+${fileData.content}`;
+
+                        const individualResponse = await this.aiService.generateAnalysis(
+                            individualPrompt,
+                            400, // Smaller token limit for individual files
+                            0.2
+                        );
+                        
+                        // Accumulate token usage
+                        fallbackTokenUsage.promptTokens += individualResponse.tokenUsage.promptTokens;
+                        fallbackTokenUsage.candidatesTokens += individualResponse.tokenUsage.candidatesTokens;
+                        fallbackTokenUsage.totalTokens += individualResponse.tokenUsage.totalTokens;
+                        
+                        // Parse the JSON response
+                        const parsedResult = JSON.parse(individualResponse.result);
+                        fallbackResults.push({
+                            summary: parsedResult.summary || '',
+                            keywords: parsedResult.keywords || '',
+                            knowledgeDomain: parsedResult.knowledgeDomain || ''
+                        });
+                        
+                        // Rate limiting between individual requests
+                        if (meaningfulFiles.length > 1) {
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                        }
+                        
+                    } catch (individualError) {
+                        console.error(`Failed to analyze individual file ${fileData.file.basename}:`, individualError);
+                        fallbackResults.push({
+                            summary: `Analysis failed for ${fileData.file.basename}`,
+                            keywords: '',
+                            knowledgeDomain: ''
+                        });
+                    }
+                }
+                
+                console.log(`Fallback analysis completed for ${fallbackResults.length} files using ${fallbackTokenUsage.totalTokens} tokens`);
+                return {
+                    results: fallbackResults,
+                    tokenUsage: fallbackTokenUsage
+                };
+                
+            } catch (fallbackError) {
+                console.error('Fallback analysis also failed:', fallbackError);
+                // Final fallback: create default results for each file
+                return {
+                    results: meaningfulFiles.map((data) => ({
+                        summary: `Analysis failed for ${data.file.basename}`,
+                        keywords: '',
+                        knowledgeDomain: ''
+                    })),
+                    tokenUsage: { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 }
+                };
+            }
         }
     }
 }
