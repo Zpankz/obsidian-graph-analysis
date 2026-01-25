@@ -38,12 +38,12 @@ interface D3HierarchyNode {
     level?: number;
 }
 
-// Add type alias for typed hierarchy node
-type TypedHierarchyNode = d3.HierarchyRectangularNode<D3HierarchyNode>;
+// Add type alias for typed hierarchy node (may be used in future)
+// type TypedHierarchyNode = d3.HierarchyRectangularNode<D3HierarchyNode>;
 
 export class DomainDistributionChart {
-    private app: App;
-    private settings: GraphAnalysisSettings;
+    // private app: App;
+    // private settings: GraphAnalysisSettings;
     private container: HTMLElement;
     private data: DomainDistributionData | null = null;
     private options: DomainChartOptions;

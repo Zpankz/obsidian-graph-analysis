@@ -3,6 +3,11 @@ import process from "process";
 import builtins from "builtin-modules";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const rootDir = path.join(__dirname, '..');
 
 const banner =
 `/*
@@ -128,6 +133,22 @@ ${source}`;
 };
 
 
+// Path alias resolver plugin
+const pathAliasPlugin = {
+  name: 'path-alias',
+  setup(build) {
+    // Resolve path aliases
+    build.onResolve({ filter: /^@\// }, (args) => {
+      const aliasPath = args.path.replace(/^@\//, '');
+      const resolvedPath = path.join(rootDir, 'src', aliasPath);
+      return {
+        path: resolvedPath,
+        namespace: 'file',
+      };
+    });
+  },
+};
+
 const context = await esbuild.context({
   banner: {
     js: banner,
@@ -155,7 +176,7 @@ const context = await esbuild.context({
   sourcemap: prod ? false : "inline",
   treeShaking: true,
   outdir: "dist",
-  plugins: [injectWasmCode, copyWasmFiles, copyDDCTemplate],
+  plugins: [pathAliasPlugin, injectWasmCode, copyWasmFiles, copyDDCTemplate],
 });
 
 if (prod) {

@@ -23,7 +23,7 @@ declare function get_graph_metadata(): string;
 declare function __wbg_init(options: { module_or_path: WebAssembly.Module | string | URL | Response | BufferSource }): Promise<any>;
 
 export default class GraphAnalysisPlugin extends Plugin {
-    settings: GraphAnalysisSettings;
+    settings!: GraphAnalysisSettings;
     wasmInitialized: boolean = false;
     graphView: GraphView | null = null;
     centralityView: CentralityResultsView | null = null;

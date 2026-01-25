@@ -346,9 +346,11 @@ pub fn calculate_closeness_centrality_cached() -> String {
     // Calculate closeness centrality using rustworkx-core
     // wf_improved: true for Wasserman and Faust's improved formula
     // This handles disconnected components and directed graphs better
+    // parallel_threshold: 50 - node count threshold for parallel execution
     let centrality_scores = closeness_centrality(
         &manager.graph,
-        true  // use improved formula for better handling of directed graphs
+        true,  // use improved formula for better handling of directed graphs
+        50     // parallel_threshold: graphs with fewer than 50 nodes run single-threaded
     );
     
     // Create nodes with closeness centrality scores

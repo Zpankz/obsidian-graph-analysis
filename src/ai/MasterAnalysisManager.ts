@@ -117,7 +117,7 @@ export class MasterAnalysisManager {
             return data;
         } catch (error) {
             // Check if this is a file not found error (ENOENT)
-            if (error.code === 'ENOENT') {
+            if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
                 console.log(`No cached ${tabName} analysis found yet. This is normal for first-time use.`);
             } else {
                 // Log other unexpected errors
@@ -306,7 +306,8 @@ ${JSON.stringify(analysisData)}`;
         } catch (error) {
             console.error('Error parsing structured knowledge network:', error);
             console.error('Structured response:', structuredResponse);
-            throw new Error(`Failed to parse structured knowledge network: ${error.message}`);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to parse structured knowledge network: ${errorMessage}`);
         }
     }
 

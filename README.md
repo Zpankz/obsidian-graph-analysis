@@ -170,35 +170,147 @@ The plugin includes several optimizations for excellent performance:
 - Rust and wasm-pack
 - Obsidian development environment
 
-### Building
+### Getting Started
 
 1. Clone the repository
-   ```
+   ```bash
    git clone https://github.com/yourusername/obsidian-graph-analysis.git
    cd obsidian-graph-analysis
    ```
 
 2. Install dependencies
-   ```
+   ```bash
    npm install
    ```
 
-3. Build the Rust WebAssembly module
+### Development Workflow
+
+**For active development:**
+```bash
+npm run dev
+```
+This command builds the WASM module once, then watches TypeScript files for changes and rebuilds automatically.
+
+**For production builds:**
+```bash
+npm run build
+```
+This command runs type checking, builds the WASM module, and then builds the TypeScript plugin with optimizations.
+
+**To test in Obsidian:**
+```bash
+npm run copy-to-vault
+```
+This copies the built files to your Obsidian vault. Restart Obsidian to load the updated plugin.
+
+### Available Scripts
+
+**Build Commands:**
+- `npm run dev` - Development mode with watch (builds WASM + TypeScript, watches for changes)
+- `npm run build` - Production build (validates types, builds WASM + TypeScript)
+- `npm run build:ci` - CI-friendly build (includes linting)
+
+**Test Commands:**
+- `npm run test` - Run all tests (lint + typecheck + Rust unit tests)
+- `npm run test:unit` - Run Rust unit tests only
+- `npm run test:ai` - Test AI model integration (requires `GEMINI_API_KEY` or `GOOGLE_GENAI_API_KEY` environment variable)
+- `npm run test:ci` - CI-friendly test command
+
+**Utility Commands:**
+- `npm run lint` - Lint TypeScript code
+- `npm run typecheck` - Type check without building
+- `npm run copy-to-vault` - Copy built files to Obsidian vault
+- `npm run version` - Bump version and update manifest files
+
+### Environment Variables
+
+The project supports environment variables via `.env` files for easier development and testing.
+
+**Setup:**
+1. Copy `.env.example` to `.env.local`:
+   ```bash
+   cp .env.example .env.local
    ```
-   cd graph-analysis-wasm
-   wasm-pack build --target web
-   cd ..
+2. Edit `.env.local` and add your values:
+   ```bash
+   GEMINI_API_KEY=your_api_key_here
+   OBSIDIAN_VAULT_PATH=/path/to/your/vault
    ```
 
-4. Build the plugin
-   ```
-   npm run build
-   ```
+**Environment Files:**
+- `.env` - Base environment variables (committed to git as `.env.example`)
+- `.env.local` - Local overrides (not committed, highest priority)
+- `.env.development` - Development-specific variables
+- `.env.production` - Production-specific variables
 
-5. Copy to your vault for testing
-   ```
-   node copy-to-vault.mjs
-   ```
+**Available Variables:**
+- `GEMINI_API_KEY` or `GOOGLE_GENAI_API_KEY` - Google Gemini API key for AI testing
+- `OBSIDIAN_VAULT_PATH` - Custom Obsidian vault path (optional, defaults to OS-specific paths)
+
+**Usage in Scripts:**
+Environment variables are automatically loaded when running:
+- `npm run test:ai` - Uses `GEMINI_API_KEY` for AI model testing
+- `npm run copy-to-vault` - Uses `OBSIDIAN_VAULT_PATH` if set
+
+### Testing
+
+**Run all tests:**
+```bash
+npm run test
+```
+
+**Test AI integration:**
+```bash
+# Using .env file (recommended)
+npm run test:ai
+
+# Or with inline environment variable
+GEMINI_API_KEY=your_key_here npm run test:ai
+```
+
+**Run only Rust tests:**
+```bash
+npm run test:unit
+```
+
+### Project Structure
+
+```
+obsidian-graph-analysis/
+├── src/                    # TypeScript source code
+│   ├── ai/                 # AI analysis features
+│   │   ├── schemas/        # AI response schemas
+│   │   └── visualization/  # AI visualization managers
+│   ├── components/         # UI components
+│   │   ├── graph-view/     # Main graph visualization
+│   │   ├── calendar-chart/ # Calendar visualization
+│   │   └── domain-distribution/ # Domain distribution charts
+│   ├── lib/                # Shared utilities and libraries
+│   │   └── color-palette.ts # Color palette system
+│   ├── services/           # Core services
+│   │   ├── AIModelService.ts
+│   │   └── PluginService.ts
+│   ├── settings/           # Settings UI
+│   ├── types/              # TypeScript type definitions
+│   ├── utils/              # Utility functions
+│   ├── views/              # Obsidian views
+│   └── main.ts             # Plugin entry point
+├── graph-analysis-wasm/    # Rust/WASM graph algorithms
+│   ├── src/                # Rust source code
+│   └── tests/              # Rust unit tests
+├── scripts/                # Build and utility scripts
+│   ├── tests/              # Test scripts
+│   └── utils/              # Script utilities
+├── dist/                   # Build output (generated)
+└── .env.example            # Environment variable template
+```
+
+**Key Directories:**
+- `src/lib/` - Shared libraries and utilities (e.g., color palette)
+- `src/types/` - TypeScript type definitions
+- `src/services/` - Core business logic services
+- `src/components/` - Reusable UI components
+- `src/ai/` - AI-powered analysis features
 
 ## Contributing
 

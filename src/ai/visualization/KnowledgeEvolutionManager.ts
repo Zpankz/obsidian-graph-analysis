@@ -86,8 +86,7 @@ export interface KnowledgeEvolutionData {
 
 export class KnowledgeEvolutionManager {
     private app: App;
-    private settings: GraphAnalysisSettings;
-    private container: HTMLElement;
+    private container!: HTMLElement;
     private data: KnowledgeEvolutionData | null = null;
     private calendarChart: KnowledgeCalendarChart | null = null;
     private createEmptyStateFn: (container: HTMLElement, message: string) => void;

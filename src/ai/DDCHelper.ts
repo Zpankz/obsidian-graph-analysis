@@ -67,7 +67,8 @@ export class DDCHelper {
             try {
                 this.ddcTemplate = JSON.parse(ddcContent);
             } catch (parseError) {
-                throw new Error(`Failed to parse DDC template JSON: ${parseError.message}`);
+                const errorMessage = parseError instanceof Error ? parseError.message : String(parseError);
+                throw new Error(`Failed to parse DDC template JSON: ${errorMessage}`);
             }
             this.ddcMainClasses = {};
             this.ddcDivisions = {};

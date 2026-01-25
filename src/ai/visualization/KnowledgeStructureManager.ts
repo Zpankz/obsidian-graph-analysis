@@ -4,7 +4,7 @@ import {
     DomainDistributionChart, 
     DomainDistributionData
 } from '../../components/domain-distribution/DomainDistributionChart';
-import { MasterAnalysisManager } from '../MasterAnalysisManager';
+// import { MasterAnalysisManager } from '../MasterAnalysisManager';
 import { DDCHelper } from '../DDCHelper';
 
 
@@ -41,11 +41,8 @@ export interface KnowledgeStructureData {
 
 export class KnowledgeStructureManager {
     private app: App;
-    private settings: GraphAnalysisSettings;
-    private container: HTMLElement;
+    private container!: HTMLElement;
     private data: KnowledgeStructureData | null = null;
-    private domainHierarchy: HierarchicalDomain[] | null = null;
-    private domainConnections: DomainConnection[] | null = null;
     private createEmptyStateFn: (container: HTMLElement, message: string) => void;
 
     constructor(app: App, settings: GraphAnalysisSettings, createEmptyStateFn?: (container: HTMLElement, message: string) => void) {
@@ -173,8 +170,9 @@ export class KnowledgeStructureManager {
         } catch (error) {
             console.error('Error creating domain distribution chart:', error);
             const errorMsg = container.createEl('div', { cls: 'error-message' });
+            const errorMessage = error instanceof Error ? error.message : String(error);
             errorMsg.createEl('p', {
-                text: `Failed to create domain chart: ${error.message}`,
+                text: `Failed to create domain chart: ${errorMessage}`,
                 cls: 'error-text'
             });
         }

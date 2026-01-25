@@ -1,6 +1,10 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { loadEnv } from './utils/load-env.mjs';
+
+// Load environment variables from .env files
+loadEnv();
 
 // Get the current directory
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -10,31 +14,39 @@ const rootDir = path.join(__dirname, '..');
 const pluginId = 'obsidian-graph-analysis';
 const pluginName = 'Graph Analysis';
 
-// Detect OS and set the vault path accordingly
-const isWindows = process.platform === 'win32';
-const isMac = process.platform === 'darwin';
-const isLinux = process.platform === 'linux';
-
 let vaultPath;
 
-if (isMac) {
-    // macOS path - update this to your actual vault path
-    const homeDir = process.env.HOME;
-    vaultPath = path.join(homeDir, 'Obsidian', 'Devs');
-} else if (isWindows) {
-    // Windows path
-    const appData = process.env.APPDATA;
-    vaultPath = path.join(appData, 'Obsidian', 'Vault');
-} else if (isLinux) {
-    // Linux path
-    const homeDir = process.env.HOME;
-    vaultPath = path.join(homeDir, '.obsidian', 'vault');
+// Check for OBSIDIAN_VAULT_PATH in environment variables first
+if (process.env.OBSIDIAN_VAULT_PATH) {
+    vaultPath = process.env.OBSIDIAN_VAULT_PATH;
+    console.log(`Using vault path from environment: ${vaultPath}`);
+} else {
+    // Detect OS and set the vault path accordingly
+    const isWindows = process.platform === 'win32';
+    const isMac = process.platform === 'darwin';
+    const isLinux = process.platform === 'linux';
+
+    if (isMac) {
+        // macOS path - update this to your actual vault path
+        const homeDir = process.env.HOME;
+        vaultPath = path.join(homeDir, 'Obsidian', 'Devs');
+    } else if (isWindows) {
+        // Windows path
+        const appData = process.env.APPDATA;
+        vaultPath = path.join(appData, 'Obsidian', 'Vault');
+    } else if (isLinux) {
+        // Linux path
+        const homeDir = process.env.HOME;
+        vaultPath = path.join(homeDir, '.obsidian', 'vault');
+    }
 }
 
 // Prompt for vault path if not found
 if (!vaultPath || !fs.existsSync(vaultPath)) {
     console.error('Obsidian vault not found at the default location.');
-    console.log('Please specify your Obsidian vault path in this script.');
+    console.log('Please either:');
+    console.log('  1. Set OBSIDIAN_VAULT_PATH in a .env or .env.local file');
+    console.log('  2. Update the default path in this script');
     process.exit(1);
 }
 

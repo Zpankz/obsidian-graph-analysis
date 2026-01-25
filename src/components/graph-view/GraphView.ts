@@ -17,7 +17,7 @@ import {
     colorPaletteToColorRange,
     // buildCustomPalette,
     // CATEGORIES
-} from '../../utils/color-palette';
+} from '../../lib/color-palette';
 
 /**
  * A simplified graph view implementation based on the D3 example
@@ -25,15 +25,14 @@ import {
  */
 export class GraphView {
     private app: App;
-    private container: HTMLElement;
-    private svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
-    private svgGroup: d3.Selection<SVGGElement, unknown, null, undefined>;
-    private zoom: d3.ZoomBehavior<SVGSVGElement, unknown>;
+    private container!: HTMLElement;
+    private svg!: d3.Selection<SVGSVGElement, unknown, null, undefined>;
+    private svgGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
+    private zoom!: d3.ZoomBehavior<SVGSVGElement, unknown>;
     private nodes: SimulationGraphNode[] = [];
     private links: SimulationGraphLink[] = [];
-    private graphMetadata: GraphMetadata | null = null;
-    private width: number;
-    private height: number;
+    private width!: number;
+    private height!: number;
     
     // Core components
     private graphDataBuilder: GraphDataBuilder;
@@ -91,11 +90,11 @@ export class GraphView {
     } as const;
 
     // D3 selections
-    private nodesSelection: d3.Selection<SVGCircleElement, SimulationGraphNode, d3.BaseType, unknown>;
-    private linksSelection: d3.Selection<SVGLineElement, SimulationGraphLink, d3.BaseType, unknown>;
+    private nodesSelection!: d3.Selection<SVGCircleElement, SimulationGraphNode, d3.BaseType, unknown>;
+    private linksSelection!: d3.Selection<SVGLineElement, SimulationGraphLink, d3.BaseType, unknown>;
     
     // Force simulation
-    private simulation: d3.Simulation<SimulationGraphNode, SimulationGraphLink>;
+    private simulation!: d3.Simulation<SimulationGraphNode, SimulationGraphLink>;
     
     // UI elements
     private loadingIndicator: HTMLElement | null = null;
@@ -122,15 +121,14 @@ export class GraphView {
     private _hideTooltipTimeout: number | null = null;
 
     // Event handlers
-    private vaultModifyHandler: (file: TFile) => void;
-    private vaultCreateHandler: (file: TFile) => void;
-    private vaultDeleteHandler: (file: TFile) => void;
-    private vaultRenameHandler: (file: TFile, oldPath: string) => void;
+    private vaultModifyHandler!: (file: TFile) => void;
+    private vaultCreateHandler!: (file: TFile) => void;
+    private vaultDeleteHandler!: (file: TFile) => void;
+    private vaultRenameHandler!: (file: TFile, oldPath: string) => void;
     private debounceTimeout: number | null = null;
 
     // Control panel elements
-    private controlPanel: HTMLElement;
-    private activeButton: HTMLElement | null = null;
+    private controlPanel!: HTMLElement;
 
     // Track selected gradients for each centrality type
     private selectedPalettes: Record<typeof this.centralityTypes[number], string> = {
