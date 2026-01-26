@@ -1,6 +1,6 @@
 import { App, Notice, TFile } from 'obsidian';
 import { GraphAnalysisSettings } from '../types/types';
-import { AIModelService, TokenUsage } from '../services/AIModelService';
+import { AIModelService } from '../services/AIModelService';
 import { KnowledgeStructureData } from './visualization/KnowledgeStructureManager';
 import { 
     KnowledgeEvolutionData,
@@ -41,9 +41,11 @@ export interface VaultAnalysisResult {
 
 export interface VaultAnalysisData {
     generatedAt: string;
+    updatedAt?: string; // Last update timestamp
     totalFiles: number;
+    generatedFiles: number; // Count from first generation
+    updatedFiles: number; // Cumulative count of updated files
     apiProvider: string;
-    tokenUsage: TokenUsage;
     results: VaultAnalysisResult[];
 }
 
@@ -53,7 +55,6 @@ export interface TabAnalysisData {
     generatedAt: string;
     sourceAnalysisId: string;
     apiProvider: string;
-    tokenUsage: TokenUsage;
 }
 
 // NEW: Interface for knowledge structure tab analysis
@@ -127,9 +128,16 @@ export class MasterAnalysisManager {
         }
     }
 
+    /**
+     * Get the path to vault-analysis.json in the responses folder
+     */
+    private getVaultAnalysisFilePath(): string {
+        return `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/responses/vault-analysis.json`;
+    }
+
     private async loadVaultAnalysisData(): Promise<VaultAnalysisData | null> {
         try {
-            const filePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/vault-analysis.json`;
+            const filePath = this.getVaultAnalysisFilePath();
             const content = await this.app.vault.adapter.read(filePath);
             return JSON.parse(content);
         } catch (error) {
@@ -267,7 +275,6 @@ ${JSON.stringify(analysisData)}`;
                 generatedAt: new Date().toISOString(),
                 sourceAnalysisId: this.generateAnalysisId(analysisData),
                 apiProvider: 'Google Gemini',
-                tokenUsage: response.tokenUsage || { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 },
                 knowledgeStructure: structureData
             };
             
@@ -357,7 +364,6 @@ ${JSON.stringify(analysisData)}`;
                 generatedAt: new Date().toISOString(),
                 sourceAnalysisId: this.generateAnalysisId(analysisData),
                 apiProvider: 'Google Gemini',
-                tokenUsage: { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 },
                 knowledgeStructure: structureData
             };
             

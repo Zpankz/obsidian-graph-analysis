@@ -182,13 +182,20 @@ export class KnowledgeStructureManager {
     }
 
     /**
+     * Get the path to vault-analysis.json in the responses folder
+     */
+    private getVaultAnalysisFilePath(): string {
+        return `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/responses/vault-analysis.json`;
+    }
+
+    /**
      * Build domain hierarchy from vault analysis data
      * This is now centralized in KnowledgeStructureManager
      */
     private async buildDomainHierarchyFromVaultAnalysis(): Promise<DomainDistributionData | null> {
         try {
             // Load vault analysis data
-            const filePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/vault-analysis.json`;
+            const filePath = this.getVaultAnalysisFilePath();
             const content = await this.app.vault.adapter.read(filePath);
             const analysisData = JSON.parse(content);
 

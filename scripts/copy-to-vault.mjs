@@ -121,19 +121,4 @@ filesToCopy.forEach(file => {
 });
 
 console.log('Plugin files copied to Obsidian vault.');
-
-// Clean up master-analysis.json file if it exists
-const masterAnalysisPath = path.join(pluginDir, 'master-analysis.json');
-if (fs.existsSync(masterAnalysisPath)) {
-    console.log(`Found deprecated master-analysis.json file at ${masterAnalysisPath}`);
-    try {
-        fs.unlinkSync(masterAnalysisPath);
-        console.log('Successfully deleted deprecated master-analysis.json file.');
-    } catch (error) {
-        console.error(`Error deleting master-analysis.json: ${error.message}`);
-    }
-} else {
-    console.log('No deprecated master-analysis.json file found. Nothing to clean up.');
-}
-
 console.log('Please restart Obsidian to load the updated plugin.'); 

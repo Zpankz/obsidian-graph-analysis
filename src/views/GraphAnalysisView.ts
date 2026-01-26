@@ -29,6 +29,8 @@ export const GRAPH_ANALYSIS_VIEW_TYPE = 'graph-analysis-view';
 export class GraphAnalysisView extends ItemView {
     private graphView: GraphView;
     private activeLeafChangeHandler: (leaf: WorkspaceLeaf | null) => void;
+    private hasInitialized: boolean = false;
+    private wasActive: boolean = false;
     
     constructor(leaf: WorkspaceLeaf, private plugin: GraphAnalysisPlugin) {
         super(leaf);
@@ -40,13 +42,24 @@ export class GraphAnalysisView extends ItemView {
             // This handles all scenarios: graph view active, note active, or other views active
             this.updateStatusBarVisibility();
             
-            // If this specific graph view became active, update the graph display
-            if (leaf === this.leaf) {
-                // Only update graph if it's actually visible and ready
-                setTimeout(() => {
+            const isNowActive = leaf === this.leaf;
+            
+            // Only reload if switching FROM inactive TO active (not on initial load)
+            if (isNowActive && this.hasInitialized && !this.wasActive) {
+                // Reload graph data when switching back to the view to ensure it's up to date
+                setTimeout(async () => {
+                    await this.reloadGraphData();
                     this.centerGraphSafely();
                 }, 100); // Small delay to ensure the view is fully rendered
+            } else if (isNowActive) {
+                // Already active or first time - just center the graph
+                setTimeout(() => {
+                    this.centerGraphSafely();
+                }, 100);
             }
+            
+            // Update active state tracking
+            this.wasActive = isNowActive;
         };
     }
 
@@ -80,10 +93,17 @@ export class GraphAnalysisView extends ItemView {
         // Initialize the graph view
         await this.graphView.onload(container);
         
+        // Mark as initialized and active after first load
+        this.hasInitialized = true;
+        this.wasActive = true; // View is active after onOpen completes
+        
         // Register event listener for view activation/deactivation
-        this.registerEvent(
-            this.app.workspace.on('active-leaf-change', this.activeLeafChangeHandler)
-        );
+        // Use a small delay to avoid immediate trigger on registration
+        setTimeout(() => {
+            this.registerEvent(
+                this.app.workspace.on('active-leaf-change', this.activeLeafChangeHandler)
+            );
+        }, 200);
         
         return;
     }
@@ -177,6 +197,25 @@ export class GraphAnalysisView extends ItemView {
         }
     }
     
+    /**
+     * Reload graph data when switching back to the view
+     */
+    private async reloadGraphData(): Promise<void> {
+        try {
+            if (this.graphView) {
+                // Check if this view is currently active/visible
+                const isActive = this.app.workspace.getActiveViewOfType(GraphAnalysisView) === this;
+                
+                // Only reload data if this view is active and visible
+                if (isActive) {
+                    await this.graphView.reloadVaultData();
+                }
+            }
+        } catch (e) {
+            console.warn("Error reloading graph data:", e);
+        }
+    }
+
     private async centerGraphSafely(): Promise<void> {
         try {
             if (this.graphView) {

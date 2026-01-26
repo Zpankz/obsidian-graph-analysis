@@ -6,7 +6,7 @@ import {
     VaultAnalysisData,
     MasterAnalysisManager
 } from './MasterAnalysisManager';
-import { AIModelService, TokenUsage } from '../services/AIModelService';
+import { AIModelService } from '../services/AIModelService';
 import { GraphDataBuilder } from '../components/graph-view/data/graph-builder';
 import { PluginService } from '../services/PluginService';
 import { DDCHelper } from './DDCHelper';
@@ -24,6 +24,29 @@ export class VaultSemanticAnalysisManager {
     private readonly MAX_NOTES_PER_BATCH = 50;
     private readonly DELAY_BETWEEN_BATCHES = 3000; // 3 seconds between batches for 30 RPM rate limiting
     private readonly RATE_LIMIT_RETRY_DELAY = 8000; // 8 second delay for rate limit retry
+
+    /**
+     * Get the path to vault-analysis.json in the responses folder
+     */
+    private getVaultAnalysisFilePath(): string {
+        return `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/responses/vault-analysis.json`;
+    }
+
+    /**
+     * Ensure responses directory exists
+     */
+    private async ensureResponsesDirectory(): Promise<void> {
+        try {
+            const responsesDir = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/responses`;
+            try {
+                await this.app.vault.adapter.mkdir(responsesDir);
+            } catch {
+                // Directory might already exist
+            }
+        } catch (error) {
+            console.error('Failed to create responses directory:', error);
+        }
+    }
 
     constructor(app: App, settings: GraphAnalysisSettings) {
         this.app = app;
@@ -239,13 +262,141 @@ export class VaultSemanticAnalysisManager {
     }
 
     /**
+     * Load existing vault analysis data if it exists
+     */
+    private async loadExistingAnalysisData(): Promise<VaultAnalysisData | null> {
+        try {
+            const filePath = this.getVaultAnalysisFilePath();
+            const content = await this.app.vault.adapter.read(filePath);
+            return JSON.parse(content);
+        } catch (error) {
+            return null;
+        }
+    }
+
+    /**
+     * Identify which files need to be re-analyzed
+     * Compares file modification times with existing analysis results
+     * Returns: { changedFiles, newFiles, deletedFilePaths, unchangedResults }
+     */
+    private async identifyChangedFiles(
+        currentFiles: TFile[],
+        existingAnalysis: VaultAnalysisData | null
+    ): Promise<{
+        changedFiles: TFile[];
+        newFiles: TFile[];
+        deletedFilePaths: string[];
+        unchangedResults: VaultAnalysisResult[];
+    }> {
+        const changedFiles: TFile[] = [];
+        const newFiles: TFile[] = [];
+        const unchangedResults: VaultAnalysisResult[] = [];
+        const deletedFilePaths: string[] = [];
+
+        // If no existing analysis, all files are new
+        if (!existingAnalysis || !existingAnalysis.results || existingAnalysis.results.length === 0) {
+            return {
+                changedFiles: [],
+                newFiles: currentFiles,
+                deletedFilePaths: [],
+                unchangedResults: []
+            };
+        }
+
+        // Create a map of existing results by file path for quick lookup
+        const existingResultsMap = new Map<string, VaultAnalysisResult>();
+        existingAnalysis.results.forEach(result => {
+            existingResultsMap.set(result.path, result);
+        });
+
+        // Check each current file
+        for (const file of currentFiles) {
+            const existingResult = existingResultsMap.get(file.path);
+            
+            if (!existingResult) {
+                // File doesn't exist in analysis - it's new
+                newFiles.push(file);
+            } else {
+                // File exists - check if it's been modified
+                try {
+                    const stat = await this.app.vault.adapter.stat(file.path);
+                    const currentMtime = stat?.mtime ? new Date(stat.mtime).getTime() : 0;
+                    const existingMtime = existingResult.modified ? new Date(existingResult.modified).getTime() : 0;
+                    
+                    if (currentMtime > existingMtime) {
+                        // File has been modified since last analysis
+                        changedFiles.push(file);
+                    } else {
+                        // File hasn't changed - keep existing result
+                        unchangedResults.push(existingResult);
+                    }
+                } catch (error) {
+                    // If we can't stat the file, treat it as changed to be safe
+                    console.warn(`Could not stat file ${file.path}, treating as changed:`, error);
+                    changedFiles.push(file);
+                }
+            }
+        }
+
+        // Find deleted files (exist in analysis but not in vault)
+        const currentFilePaths = new Set(currentFiles.map(f => f.path));
+        existingAnalysis.results.forEach(result => {
+            if (!currentFilePaths.has(result.path)) {
+                deletedFilePaths.push(result.path);
+            }
+        });
+
+        return {
+            changedFiles,
+            newFiles,
+            deletedFilePaths,
+            unchangedResults
+        };
+    }
+
+    /**
+     * Merge new analysis results with existing unchanged results
+     * Removes deleted files and sorts by title
+     */
+    private mergeAnalysisResults(
+        unchangedResults: VaultAnalysisResult[],
+        newResults: VaultAnalysisResult[],
+        deletedFilePaths: string[]
+    ): VaultAnalysisResult[] {
+        // Start with unchanged results
+        const mergedResults = [...unchangedResults];
+        
+        // Add new/updated results
+        mergedResults.push(...newResults);
+        
+        // Remove deleted files from the merged results
+        const deletedPathsSet = new Set(deletedFilePaths);
+        const beforeFilterCount = mergedResults.length;
+        const filteredResults = mergedResults.filter(result => {
+            const isDeleted = deletedPathsSet.has(result.path);
+            if (isDeleted) {
+                console.log(`Removing deleted file from analysis: ${result.path}`);
+            }
+            return !isDeleted;
+        });
+        
+        const removedCount = beforeFilterCount - filteredResults.length;
+        if (removedCount > 0) {
+            console.log(`Removed ${removedCount} deleted file(s) from analysis results`);
+        }
+        
+        // Sort by title for consistency
+        return filteredResults.sort((a, b) => a.title.localeCompare(b.title));
+    }
+
+    /**
      * Enhance existing vault analysis results with graph metrics
      * This handles scenario 2: cached vault-analysis.json exists
      */
     public async enhanceWithGraphMetrics(): Promise<boolean> {
         try {
             // Load existing analysis data
-            const filePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/vault-analysis.json`;
+            const filePath = this.getVaultAnalysisFilePath();
             
             let existingData: VaultAnalysisData;
             try {
@@ -272,12 +423,20 @@ export class VaultSemanticAnalysisManager {
             const resultsWithRankings = this.calculateCentralityRankings(enhancedResults);
             
             // Update the analysis data
+            // Preserve existing metadata fields, migrate from old format if needed
+            const existingGeneratedFiles = existingData.generatedFiles ?? existingData.totalFiles;
+            const existingUpdatedFiles = existingData.updatedFiles ?? 0;
+            
             const updatedData: VaultAnalysisData = {
                 ...existingData,
                 results: resultsWithRankings,
-                // Update timestamp to reflect the enhancement
-                generatedAt: new Date().toISOString()
+                // Preserve generation metadata, don't overwrite generatedAt
+                generatedFiles: existingGeneratedFiles,
+                updatedFiles: existingUpdatedFiles
             };
+            
+            // Ensure responses directory exists before saving
+            await this.ensureResponsesDirectory();
             
             // Save the enhanced data
             await this.app.vault.adapter.write(filePath, JSON.stringify(updatedData, null, 2));
@@ -291,13 +450,17 @@ export class VaultSemanticAnalysisManager {
         }
     }
 
-    public async generateVaultAnalysis(): Promise<void> {
+    public async generateVaultAnalysis(): Promise<boolean> {
         try {
             // Check if Gemini API key is configured
             if (!this.settings.geminiApiKey || this.settings.geminiApiKey.trim() === '') {
                 new Notice('Please configure your Gemini API key in settings to use vault analysis.');
-                return;
+                return false;
             }
+
+            // Load existing analysis data for incremental updates
+            const existingAnalysis = await this.loadExistingAnalysisData();
+            const isIncrementalUpdate = existingAnalysis !== null && existingAnalysis.results && existingAnalysis.results.length > 0;
 
             // Get all markdown files in the vault
             const allFiles = this.app.vault.getMarkdownFiles();
@@ -307,16 +470,58 @@ export class VaultSemanticAnalysisManager {
             
             if (includedFiles.length === 0) {
                 new Notice('No files found for analysis after applying exclusion rules.');
-                return;
+                return false;
             }
 
-            // Show initial notice
-            const progressNotice = new Notice(`Starting vault analysis for ${includedFiles.length} files...`, 0);
+            // Create a Set of new file paths for quick lookup during batch processing
+            const newFilePaths = new Set<string>();
+            
+            // Identify changed files for incremental update
+            let filesToProcess: TFile[];
+            let unchangedResults: VaultAnalysisResult[] = [];
+            let deletedFilePaths: string[] = [];
+            let changedCount = 0;
+            let newCount = 0;
+            let unchangedCount = 0;
+
+            if (isIncrementalUpdate) {
+                // Incremental update: only process changed/new files
+                const changeInfo = await this.identifyChangedFiles(includedFiles, existingAnalysis);
+                filesToProcess = [...changeInfo.changedFiles, ...changeInfo.newFiles];
+                unchangedResults = changeInfo.unchangedResults;
+                deletedFilePaths = changeInfo.deletedFilePaths;
+                changedCount = changeInfo.changedFiles.length;
+                newCount = changeInfo.newFiles.length;
+                unchangedCount = changeInfo.unchangedResults.length;
+                
+                // Populate Set of new file paths for quick lookup during batch processing
+                changeInfo.newFiles.forEach(file => newFilePaths.add(file.path));
+
+                // If no files need processing, show message and return
+                if (filesToProcess.length === 0) {
+                    new Notice(`✅ All files are up to date. No changes detected. (${unchangedCount} files unchanged)`);
+                    return false;
+                }
+            } else {
+                // Full update: process all files
+                filesToProcess = includedFiles;
+                unchangedCount = 0;
+                // All files are new in a full update
+                filesToProcess.forEach(file => newFilePaths.add(file.path));
+            }
+
+            // Show initial notice with incremental update info
+            let initialMessage: string;
+            if (isIncrementalUpdate) {
+                initialMessage = `Updating analysis: ${changedCount} changed, ${newCount} new, ${unchangedCount} unchanged files (processing ${filesToProcess.length} files)...`;
+            } else {
+                initialMessage = `Starting vault analysis for ${filesToProcess.length} files...`;
+            }
+            const progressNotice = new Notice(initialMessage, 0);
             
             const results: VaultAnalysisResult[] = [];
             let processed = 0;
             let failed = 0;
-            let totalTokenUsage: TokenUsage = { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 };
 
             // Prepare file data first to get word counts
             progressNotice.setMessage('Preparing files for analysis...');
@@ -329,7 +534,7 @@ export class VaultSemanticAnalysisManager {
                 isShort: boolean;
             }> = [];
 
-            for (const file of includedFiles) {
+            for (const file of filesToProcess) {
                 try {
                     const content = await this.app.vault.read(file);
                     const cleanedContent = this.cleanupContent(content);
@@ -387,12 +592,16 @@ export class VaultSemanticAnalysisManager {
             const averageBatchSize = Math.round(fileDataList.length / totalBatches);
             
             // Log batch distribution for transparency
-            console.log(`Processing ${includedFiles.length} files in ${totalBatches} note-based batches (max ${this.MAX_NOTES_PER_BATCH} notes per batch) using ${this.aiService.getModelName()}`);
+            const updateType = isIncrementalUpdate ? 'incremental' : 'full';
+            console.log(`Processing ${filesToProcess.length} files (${updateType} update) in ${totalBatches} note-based batches (max ${this.MAX_NOTES_PER_BATCH} notes per batch) using ${this.aiService.getModelName()}`);
+            if (isIncrementalUpdate) {
+                console.log(`Incremental update: ${changedCount} changed, ${newCount} new, ${unchangedCount} unchanged files`);
+            }
             console.log(`Average batch size: ${averageBatchSize} notes per batch`);
             
             // Log batch size distribution for small vaults
             if (totalBatches === 1 && fileDataList.length < this.MAX_NOTES_PER_BATCH) {
-                console.log(`Small vault detected: processing all ${fileDataList.length} notes in a single batch`);
+                console.log(`Small batch detected: processing all ${fileDataList.length} notes in a single batch`);
             } else if (totalBatches > 1) {
                 const batchSizes = batches.map(batch => batch.length);
                 console.log(`Batch size distribution: ${batchSizes.join(', ')} notes per batch`);
@@ -405,20 +614,19 @@ export class VaultSemanticAnalysisManager {
                 const batchWordCount = batch.reduce((sum, f) => sum + f.wordCount, 0);
                 
                 // Update progress with batch info
-                const tokenInfo = totalTokenUsage.totalTokens > 0 ? ` (${totalTokenUsage.totalTokens} tokens used)` : '';
-                progressNotice.setMessage(`Processing batch ${batchIndex + 1}/${totalBatches} (${batchFileCount} notes, ${batchWordCount} words)... (${processed}/${includedFiles.length} completed, ${failed} failed)${tokenInfo}`);
+                const totalToProcess = filesToProcess.length;
+                const progressText = isIncrementalUpdate 
+                    ? `Processing batch ${batchIndex + 1}/${totalBatches} (${batchFileCount} notes, ${batchWordCount} words)... (${processed}/${totalToProcess} completed, ${failed} failed, ${unchangedCount} unchanged)`
+                    : `Processing batch ${batchIndex + 1}/${totalBatches} (${batchFileCount} notes, ${batchWordCount} words)... (${processed}/${totalToProcess} completed, ${failed} failed)`;
+                progressNotice.setMessage(progressText);
                 
                 try {
                     // Process entire batch in a single API request
                     const batchResult = await this.analyzeBatch(batch);
                     const batchResults = batchResult.results;
+                    // Note: Token usage is no longer tracked
                     
-                    // Accumulate token usage
-                    totalTokenUsage.promptTokens += batchResult.tokenUsage.promptTokens;
-                    totalTokenUsage.candidatesTokens += batchResult.tokenUsage.candidatesTokens;
-                    totalTokenUsage.totalTokens += batchResult.tokenUsage.totalTokens;
-                    
-                    console.log(`Batch ${batchIndex + 1} completed successfully: ${batchFileCount} notes, ${batchWordCount} words, ${batchResult.tokenUsage.totalTokens} tokens`);
+                    console.log(`Batch ${batchIndex + 1} completed successfully: ${batchFileCount} notes, ${batchWordCount} words`);
                     
                     // Process batch results
                     for (let i = 0; i < batch.length; i++) {
@@ -441,8 +649,10 @@ export class VaultSemanticAnalysisManager {
                     // Check if it's a rate limit error (429) and retry with longer delay
                     if (batchError instanceof Error && batchError.message.includes('429')) {
                         console.log(`Rate limit hit, retrying batch ${batchIndex + 1} after longer delay...`);
-                        const tokenInfo = totalTokenUsage.totalTokens > 0 ? ` (${totalTokenUsage.totalTokens} tokens used)` : '';
-                        progressNotice.setMessage(`Rate limit exceeded, waiting before retry... (${processed}/${includedFiles.length} completed, ${failed} failed)${tokenInfo}`);
+                        const retryProgressText = isIncrementalUpdate
+                            ? `Rate limit exceeded, waiting before retry... (${processed}/${filesToProcess.length} completed, ${failed} failed, ${unchangedCount} unchanged)`
+                            : `Rate limit exceeded, waiting before retry... (${processed}/${filesToProcess.length} completed, ${failed} failed)`;
+                        progressNotice.setMessage(retryProgressText);
                         
                         // Wait longer for rate limit retry (respecting 30 RPM = max 2 requests per minute)
                         await new Promise(resolve => setTimeout(resolve, this.RATE_LIMIT_RETRY_DELAY)); // 8 second delay for rate limit retry
@@ -452,11 +662,6 @@ export class VaultSemanticAnalysisManager {
                             console.log(`Retrying batch ${batchIndex + 1}...`);
                             const retryResult = await this.analyzeBatch(batch);
                             const retryResults = retryResult.results;
-                            
-                            // Accumulate token usage from retry
-                            totalTokenUsage.promptTokens += retryResult.tokenUsage.promptTokens;
-                            totalTokenUsage.candidatesTokens += retryResult.tokenUsage.candidatesTokens;
-                            totalTokenUsage.totalTokens += retryResult.tokenUsage.totalTokens;
                             
                             console.log(`Batch ${batchIndex + 1} retry completed successfully`);
                             
@@ -489,8 +694,10 @@ export class VaultSemanticAnalysisManager {
                 
                 // Rate limiting: wait between batches to respect 30 RPM limit
                 if (batchIndex < totalBatches - 1) {
-                    const tokenInfo = totalTokenUsage.totalTokens > 0 ? ` (${totalTokenUsage.totalTokens} tokens used)` : '';
-                    progressNotice.setMessage(`Rate limiting: waiting 3s before next batch... (${processed}/${includedFiles.length} completed, ${failed} failed)${tokenInfo}`);
+                    const rateLimitProgressText = isIncrementalUpdate
+                        ? `Rate limiting: waiting 3s before next batch... (${processed}/${filesToProcess.length} completed, ${failed} failed, ${unchangedCount} unchanged)`
+                        : `Rate limiting: waiting 3s before next batch... (${processed}/${filesToProcess.length} completed, ${failed} failed)`;
+                    progressNotice.setMessage(rateLimitProgressText);
                     await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
                 } else if (totalBatches === 1) {
                     // Single batch - no rate limiting needed
@@ -501,12 +708,25 @@ export class VaultSemanticAnalysisManager {
             // Hide progress notice
             progressNotice.hide();
 
+            // Merge results: combine new/updated results with unchanged results
+            let finalResults: VaultAnalysisResult[];
+            if (isIncrementalUpdate) {
+                // Merge new results with unchanged results, removing deleted files
+                finalResults = this.mergeAnalysisResults(unchangedResults, results, deletedFilePaths);
+                console.log(`Merged results: ${unchangedResults.length} unchanged + ${results.length} new/updated - ${deletedFilePaths.length} deleted = ${finalResults.length} total`);
+            } else {
+                // Full update: use all results
+                // Note: Deleted files are automatically excluded because we only process files that exist in the vault
+                finalResults = results;
+                console.log(`Full update: ${results.length} files processed (deleted files automatically excluded)`);
+            }
+
             // Calculate graph metrics and enhance results
             const enhanceNotice = new Notice('Calculating graph metrics...', 0);
             const graphMetrics = await this.calculateGraphMetrics();
             
-            // Enhance results with graph metrics
-            const enhancedResults = results.map(result => {
+            // Enhance results with graph metrics (for all files, including unchanged ones)
+            const enhancedResults = finalResults.map(result => {
                 const metrics = graphMetrics.get(result.path);
                 return {
                     ...result,
@@ -517,21 +737,43 @@ export class VaultSemanticAnalysisManager {
             // Calculate and add centrality rankings
             const resultsWithRankings = this.calculateCentralityRankings(enhancedResults);
             
-            // Save enhanced results to JSON file with token usage
-            await this.saveAnalysisResults(resultsWithRankings, totalTokenUsage);
+            // Save enhanced results to JSON file
+            await this.saveAnalysisResults(
+                resultsWithRankings, 
+                isIncrementalUpdate,
+                newCount,
+                changedCount
+            );
             
             enhanceNotice.hide();
             
-            // Show completion notice with detailed stats including token usage
-            if (failed === 0) {
-                new Notice(`✅ Vault analysis with graph metrics completed successfully! Processed ${processed} files using ${totalTokenUsage.totalTokens} tokens. Results saved to plugin data folder`);
+            // Show completion notice with detailed stats
+            const successCount = processed - failed;
+            let completionMessage: string;
+            
+            if (isIncrementalUpdate) {
+                if (failed === 0) {
+                    completionMessage = `✅ Analysis updated successfully! Processed ${successCount} changed/new files (${changedCount} changed, ${newCount} new), kept ${unchangedCount} unchanged, removed ${deletedFilePaths.length} deleted.`;
+                } else {
+                    completionMessage = `⚠️ Analysis update completed with some issues. Processed ${successCount} files successfully, ${failed} failed, kept ${unchangedCount} unchanged, removed ${deletedFilePaths.length} deleted.`;
+                }
             } else {
-                new Notice(`⚠️ Vault analysis with graph metrics completed with some issues. Processed ${processed - failed} files successfully, ${failed} failed, using ${totalTokenUsage.totalTokens} tokens. Results saved to plugin data folder`);
+                if (failed === 0) {
+                    completionMessage = `✅ Vault analysis with graph metrics completed successfully! Processed ${successCount} files. Results saved to plugin data folder`;
+                } else {
+                    completionMessage = `⚠️ Vault analysis with graph metrics completed with some issues. Processed ${successCount} files successfully, ${failed} failed. Results saved to plugin data folder`;
+                }
             }
+            
+            new Notice(completionMessage);
+            
+            // Return true to indicate analysis completed successfully
+            return true;
             
         } catch (error) {
             console.error('Failed to generate vault analysis:', error);
             new Notice(`❌ Failed to generate vault analysis: ${(error as Error).message}`);
+            return false;
         }
     }
 
@@ -544,7 +786,6 @@ export class VaultSemanticAnalysisManager {
         isShort: boolean;
     }>): Promise<{
         results: Array<{ success: boolean; data?: VaultAnalysisResult; error?: string }>;
-        tokenUsage: TokenUsage;
     }> {
         try {
             // File data is already prepared, no need to read files again
@@ -555,7 +796,6 @@ export class VaultSemanticAnalysisManager {
             const apiFiles = fileData.filter(data => !data.isShort);
             
             const results: Array<{ success: boolean; data?: VaultAnalysisResult; error?: string }> = [];
-            let totalTokenUsage: TokenUsage = { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 };
             
             // Handle short files locally without API call
             shortFiles.forEach(data => {
@@ -580,11 +820,6 @@ export class VaultSemanticAnalysisManager {
                 try {
                     // Use structured output instead of deprecated generateBatchAnalysis
                     const batchAnalysisResult = await this.generateStructuredBatchAnalysis(apiFiles);
-                    
-                    // Accumulate token usage
-                    totalTokenUsage.promptTokens += batchAnalysisResult.tokenUsage.promptTokens;
-                    totalTokenUsage.candidatesTokens += batchAnalysisResult.tokenUsage.candidatesTokens;
-                    totalTokenUsage.totalTokens += batchAnalysisResult.tokenUsage.totalTokens;
                     
                     // Process API results
                     for (let i = 0; i < apiFiles.length; i++) {
@@ -643,13 +878,12 @@ export class VaultSemanticAnalysisManager {
                 }
             }
             
-            return { results: sortedResults, tokenUsage: totalTokenUsage };
+            return { results: sortedResults };
         } catch (error) {
             console.error('Error in batch analysis:', error);
             // Return error for all files in batch
             return {
-                results: fileDataList.map(() => ({ success: false, error: (error as Error).message })),
-                tokenUsage: { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 }
+                results: fileDataList.map(() => ({ success: false, error: (error as Error).message }))
             };
         }
     }
@@ -698,7 +932,7 @@ export class VaultSemanticAnalysisManager {
     }
 
     private async ensureVaultAnalysisFileExists(): Promise<void> {
-        const filePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/vault-analysis.json`;
+        const filePath = this.getVaultAnalysisFilePath();
         try {
             await this.app.vault.adapter.read(filePath);
         } catch {
@@ -706,19 +940,15 @@ export class VaultSemanticAnalysisManager {
             const initialData: VaultAnalysisData = {
                 generatedAt: new Date().toISOString(),
                 totalFiles: 0,
+                generatedFiles: 0,
+                updatedFiles: 0,
                 apiProvider: 'Google Gemini',
-                tokenUsage: { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 },
                 results: []
             };
-            // Ensure the plugin directory exists
-            const pluginDir = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis`;
-            try {
-                await this.app.vault.adapter.mkdir(pluginDir);
-            } catch {
-                // Directory might already exist
-            }
+            // Ensure responses directory exists
+            await this.ensureResponsesDirectory();
             await this.app.vault.adapter.write(filePath, JSON.stringify(initialData, null, 2));
-            console.log('Created initial vault analysis file in plugin data folder');
+            console.log('Created initial vault analysis file in responses folder');
         }
     }
 
@@ -727,8 +957,8 @@ export class VaultSemanticAnalysisManager {
             // Ensure the file exists
             await this.ensureVaultAnalysisFileExists();
             
-            // Try to read existing vault analysis results from plugin data folder
-            const filePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/vault-analysis.json`;
+            // Try to read existing vault analysis results from responses folder
+            const filePath = this.getVaultAnalysisFilePath();
             let analysisData = null;
             let hasExistingData = false;
             
@@ -852,10 +1082,26 @@ export class VaultSemanticAnalysisManager {
         // No cleanup needed - removed unused statusBarItem
     }
 
-    private async saveAnalysisResults(results: VaultAnalysisResult[], totalTokenUsage: TokenUsage): Promise<void> {
+    private async saveAnalysisResults(
+        results: VaultAnalysisResult[], 
+        isIncrementalUpdate: boolean,
+        newCount: number,
+        changedCount: number
+    ): Promise<void> {
         try {
             // Ensure the file exists
             await this.ensureVaultAnalysisFileExists();
+            
+            // Load existing data if it exists (for migration and cumulative tracking)
+            let existingData: VaultAnalysisData | null = null;
+            try {
+                const filePath = this.getVaultAnalysisFilePath();
+                const content = await this.app.vault.adapter.read(filePath);
+                existingData = JSON.parse(content);
+            } catch {
+                // File doesn't exist or invalid - will create new
+                existingData = null;
+            }
             
             // Sort results by title for consistent ordering
             const sortedResults = results.sort((a, b) => a.title.localeCompare(b.title));
@@ -909,21 +1155,60 @@ export class VaultSemanticAnalysisManager {
             });
             
             // Create the output data with metadata
-            const outputData: VaultAnalysisData = {
-                generatedAt: new Date().toISOString(),
-                totalFiles: enhancedResults.length,
-                apiProvider: 'Google Gemini',
-                tokenUsage: totalTokenUsage,
-                results: enhancedResults
-            };
+            let outputData: VaultAnalysisData;
             
-            // Save to plugin data folder
-            const filePath = `${this.app.vault.configDir}/plugins/obsidian-graph-analysis/vault-analysis.json`;
+            if (!isIncrementalUpdate) {
+                // First generation: set all generated fields
+                outputData = {
+                    generatedAt: new Date().toISOString(),
+                    totalFiles: enhancedResults.length,
+                    generatedFiles: enhancedResults.length,
+                    updatedFiles: 0,
+                    apiProvider: 'Google Gemini',
+                    results: enhancedResults
+                };
+            } else {
+                // Incremental update: preserve generated fields, update cumulative fields
+                if (existingData) {
+                    // Migrate from old format if needed
+                    const existingGeneratedFiles = existingData.generatedFiles ?? existingData.totalFiles;
+                    const existingUpdatedFiles = existingData.updatedFiles ?? 0;
+                    
+                    // Add to cumulative updated counts
+                    const cumulativeUpdatedFiles = existingUpdatedFiles + newCount + changedCount;
+                    
+                    outputData = {
+                        generatedAt: existingData.generatedAt,
+                        updatedAt: new Date().toISOString(),
+                        totalFiles: enhancedResults.length,
+                        generatedFiles: existingGeneratedFiles,
+                        updatedFiles: cumulativeUpdatedFiles,
+                        apiProvider: 'Google Gemini',
+                        results: enhancedResults
+                    };
+                } else {
+                    // No existing data (shouldn't happen in incremental update, but handle gracefully)
+                    outputData = {
+                        generatedAt: new Date().toISOString(),
+                        totalFiles: enhancedResults.length,
+                        generatedFiles: enhancedResults.length,
+                        updatedFiles: 0,
+                        apiProvider: 'Google Gemini',
+                        results: enhancedResults
+                    };
+                }
+            }
+            
+            // Ensure responses directory exists
+            await this.ensureResponsesDirectory();
+            
+            // Save to responses folder
+            const filePath = this.getVaultAnalysisFilePath();
             
             // Write the file
             await this.app.vault.adapter.write(filePath, JSON.stringify(outputData, null, 2));
             
-            console.log(`Vault analysis results saved to plugin data folder: ${filePath}`);
+            console.log(`Vault analysis results saved to responses folder: ${filePath}`);
             
             // Create initial structure-analysis.json file with domain hierarchy
             await this.masterAnalysisManager.createInitialStructureAnalysis();
@@ -950,15 +1235,13 @@ export class VaultSemanticAnalysisManager {
             keywords: string;
             knowledgeDomain: string;
         }>;
-        tokenUsage: TokenUsage;
     }> {
         // Filter out short files (they should already be filtered, but double-check)
         const meaningfulFiles = fileData.filter(data => !data.isShort && data.content.trim().length > 0);
         
         if (meaningfulFiles.length === 0) {
             return {
-                results: [],
-                tokenUsage: { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 }
+                results: []
             };
         }
 
@@ -1025,17 +1308,14 @@ For each note, provide:
                 0.72 // Default topP
             );
 
-            // Use actual token usage from API response instead of estimation
-            const actualTokenUsage = response.tokenUsage;
-            console.log(`Batch analysis completed with DDC classification using structured output. Actual token usage: ${actualTokenUsage.totalTokens} total (${actualTokenUsage.promptTokens} prompt + ${actualTokenUsage.candidatesTokens} response)`);
+            console.log(`Batch analysis completed with DDC classification using structured output`);
 
             return {
                 results: response.result.map(item => ({
                     summary: item.summary || '',
                     keywords: item.keywords || '',
                     knowledgeDomain: item.knowledgeDomain || ''
-                })),
-                tokenUsage: actualTokenUsage
+                }))
             };
 
         } catch (structuredError) {
@@ -1049,8 +1329,7 @@ For each note, provide:
                     summary: `Analysis failed for ${data.file.basename} - structured analysis error`,
                     keywords: '',
                     knowledgeDomain: ''
-                })),
-                tokenUsage: { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 }
+                }))
             };
         }
     }

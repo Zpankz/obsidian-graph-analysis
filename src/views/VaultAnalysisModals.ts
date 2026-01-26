@@ -14,7 +14,8 @@ import { GraphAnalysisSettings } from '../types/types';
 
 // Import type for the manager
 export interface VaultSemanticAnalysisManager {
-    generateVaultAnalysis(): Promise<void>;
+    generateVaultAnalysis(): Promise<boolean>;
+    viewVaultAnalysisResults(): Promise<void>;
 }
 
 export class VaultAnalysisModal extends Modal {
@@ -34,6 +35,15 @@ export class VaultAnalysisModal extends Modal {
     private actionsAnalysisData: ActionsAnalysisData | null = null;
     
     private knowledgeStructureManager: KnowledgeStructureManager | null = null;
+    
+    // Pagination state
+    private currentPage: number = 1;
+    private readonly itemsPerPage: number = 20;
+    private filteredResults: VaultAnalysisResult[] = [];
+    private paginationContainer: HTMLElement | null = null;
+    private resultsSection: HTMLElement | null = null;
+    private resultsContainer: HTMLElement | null = null;
+    private resultsWrapper: HTMLElement | null = null;
 
     constructor(
         app: App, 
@@ -186,20 +196,23 @@ export class VaultAnalysisModal extends Modal {
             text: `Total files analyzed: ${this.analysisData.totalFiles}`
         });
         
+        // Generated information
+        const generatedFiles = this.analysisData.generatedFiles ?? this.analysisData.totalFiles;
         summaryContainer.createEl('p', {
-            text: `Generated: ${new Date(this.analysisData.generatedAt).toLocaleString()}`
+            text: `Generated: ${generatedFiles} files on ${new Date(this.analysisData.generatedAt).toLocaleString()}`
         });
+        
+        // Updated information (if exists)
+        if (this.analysisData.updatedAt) {
+            const updatedFiles = this.analysisData.updatedFiles ?? 0;
+            summaryContainer.createEl('p', {
+                text: `Updated: ${updatedFiles} files on ${new Date(this.analysisData.updatedAt).toLocaleString()}`
+            });
+        }
         
         summaryContainer.createEl('p', {
             text: `API Provider: ${this.analysisData.apiProvider}`
         });
-        
-        // Token usage information
-        if (this.analysisData.tokenUsage && this.analysisData.tokenUsage.totalTokens > 0) {
-            summaryContainer.createEl('p', {
-                text: `Tokens used: ${this.analysisData.tokenUsage.totalTokens.toLocaleString()} (${this.analysisData.tokenUsage.promptTokens.toLocaleString()} input + ${this.analysisData.tokenUsage.candidatesTokens.toLocaleString()} output)`
-            });
-        }
 
         // Search section
         const searchSection = this.contentContainer.createEl('div', { 
@@ -222,128 +235,73 @@ export class VaultAnalysisModal extends Modal {
         });
         
         // Results section
-        const resultsSection = this.contentContainer.createEl('div', { 
-            cls: 'vault-analysis-section' 
+        this.resultsSection = this.contentContainer.createEl('div', { 
+            cls: 'vault-analysis-section vault-analysis-results-section' 
         });
         
-        resultsSection.createEl('h3', {
+        this.resultsSection.createEl('h3', {
             text: 'Analysis Results',
             cls: 'vault-analysis-section-title'
         });
         
-        const resultsContainer = resultsSection.createEl('div', { 
+        // Create scrollable results container wrapper
+        this.resultsWrapper = this.resultsSection.createEl('div', {
+            cls: 'vault-analysis-results-wrapper'
+        });
+        
+        this.resultsContainer = this.resultsWrapper.createEl('div', { 
             cls: 'vault-analysis-results' 
         });
         
         // Display results function
         const displayResults = (filteredResults: VaultAnalysisResult[]) => {
-            resultsContainer.empty();
+            // Store filtered results for pagination
+            this.filteredResults = filteredResults;
+            
+            // Reset to page 1 when results change
+            this.currentPage = 1;
             
             if (filteredResults.length === 0) {
-                resultsContainer.createEl('p', {
-                    text: 'No results found matching your search.',
-                    cls: 'no-results'
-                });
+                if (this.resultsContainer) {
+                    this.resultsContainer.empty();
+                    this.resultsContainer.createEl('p', {
+                        text: 'No results found matching your search.',
+                        cls: 'no-results'
+                    });
+                }
+                // Remove pagination if it exists
+                if (this.paginationContainer) {
+                    this.paginationContainer.remove();
+                    this.paginationContainer = null;
+                }
                 return;
             }
             
-            filteredResults.forEach(result => {
-                const resultItem = resultsContainer.createEl('div', { 
-                    cls: 'vault-analysis-result-item' 
-                });
-                
-                const titleEl = resultItem.createEl('h3', {
-                    text: result.title,
-                    cls: 'result-title'
-                });
-                
-                // Make title clickable to open the note
-                titleEl.style.cursor = 'pointer';
-                titleEl.style.color = 'var(--text-accent)';
-                titleEl.addEventListener('click', async () => {
-                    const file = this.app.vault.getAbstractFileByPath(result.path);
-                    if (file) {
-                        await this.app.workspace.openLinkText(file.path, '');
-                        this.close();
-                    }
-                });
-                
-                resultItem.createEl('p', {
-                    text: result.summary,
-                    cls: 'result-summary'
-                });
-                
-                resultItem.createEl('p', {
-                    text: `Keywords: ${result.keywords}`,
-                    cls: 'result-keywords'
-                });
-                
-                resultItem.createEl('p', {
-                    text: `Knowledge Domain: ${
-                        (result.knowledgeDomains && result.knowledgeDomains.length > 0
-                            ? result.knowledgeDomains.join(', ')
-                            : 'Unknown'
-                        ).replace(/\s*\([^)]*\)/g, '')
-                    }`,
-                    cls: 'result-domain'
-                });
-                
-                // Display graph metrics if available
-                if (result.graphMetrics) {
-                    const metrics = [
-                        { key: 'degreeCentrality', label: 'Degree' },
-                        { key: 'betweennessCentrality', label: 'Betweenness' },
-                        { key: 'closenessCentrality', label: 'Closeness' },
-                        { key: 'eigenvectorCentrality', label: 'Eigenvector' }
-                    ];
-                    
-                    const metricValues = metrics
-                        .map(metric => {
-                            const value = result.graphMetrics![metric.key as keyof typeof result.graphMetrics];
-                            return value !== undefined && value !== null ? `${metric.label}-${value.toFixed(3)}` : null;
-                        })
-                        .filter(Boolean);
-                    
-                    if (metricValues.length > 0) {
-                        resultItem.createEl('p', {
-                            text: `Graph Centrality Metrics: ${metricValues.join(', ')}`,
-                            cls: 'result-domain'
-                        });
-                    }
+            // Render current page (will use currentPage which is now 1)
+            this.renderCurrentPage();
+            
+            // Create or update pagination controls
+            const totalPages = Math.ceil(filteredResults.length / this.itemsPerPage);
+            const totalResults = filteredResults.length;
+            if (this.resultsSection) {
+                if (this.paginationContainer) {
+                    this.paginationContainer.remove();
+                    this.paginationContainer = null;
                 }
-                
-                const metaContainer = resultItem.createEl('div', {
-                    cls: 'result-meta'
-                });
-                
-                metaContainer.createEl('span', {
-                    text: `${result.wordCount} words`,
-                    cls: 'result-word-count'
-                });
-                
-                // Display dates (created and modified) on the same line
-                const dateInfo = [];
-                if (result.created) {
-                    dateInfo.push(`Created: ${new Date(result.created).toLocaleDateString()}`);
-                }
-                if (result.modified) {
-                    dateInfo.push(`Modified: ${new Date(result.modified).toLocaleDateString()}`);
-                }
-                if (dateInfo.length > 0) {
-                    metaContainer.createEl('span', {
-                        text: ` • ${dateInfo.join(' • ')}`,
-                        cls: 'result-date'
-                    });
-                }
-            });
+                this.createPaginationControls(this.resultsSection, totalPages, totalResults);
+            }
         };
         
         // Initial display
+        this.currentPage = 1; // Reset to first page on initial load
         displayResults(this.analysisData.results);
         
         // Search functionality
         searchInput.addEventListener('input', (e: Event) => {
             const searchTerm = (e.target as HTMLInputElement).value.toLowerCase();
+            
+            // Reset to first page when search changes
+            this.currentPage = 1;
             
             if (!searchTerm || !this.analysisData?.results) {
                 displayResults(this.analysisData?.results || []);
@@ -364,6 +322,251 @@ export class VaultAnalysisModal extends Modal {
         
         // Action buttons
         this.createActionButtons();
+    }
+
+    private renderCurrentPage(): void {
+        if (!this.resultsContainer) return;
+
+        // Calculate paginated results
+        const startIndex = (this.currentPage - 1) * this.itemsPerPage;
+        const endIndex = startIndex + this.itemsPerPage;
+        const paginatedResults = this.filteredResults.slice(startIndex, endIndex);
+
+        // Clear and re-render results
+        this.resultsContainer.empty();
+        paginatedResults.forEach(result => {
+            const resultItem = this.resultsContainer!.createEl('div', { 
+                cls: 'vault-analysis-result-item' 
+            });
+            
+            const titleEl = resultItem.createEl('h3', {
+                text: result.title,
+                cls: 'result-title'
+            });
+            
+            // Make title clickable to open the note
+            titleEl.style.cursor = 'pointer';
+            titleEl.style.color = 'var(--text-accent)';
+            titleEl.addEventListener('click', async () => {
+                const file = this.app.vault.getAbstractFileByPath(result.path);
+                if (file) {
+                    await this.app.workspace.openLinkText(file.path, '');
+                    this.close();
+                }
+            });
+            
+            resultItem.createEl('p', {
+                text: result.summary,
+                cls: 'result-summary'
+            });
+            
+            resultItem.createEl('p', {
+                text: `Keywords: ${result.keywords}`,
+                cls: 'result-keywords'
+            });
+            
+            resultItem.createEl('p', {
+                text: `Knowledge Domain: ${
+                    (result.knowledgeDomains && result.knowledgeDomains.length > 0
+                        ? result.knowledgeDomains.join(', ')
+                        : 'Unknown'
+                    ).replace(/\s*\([^)]*\)/g, '')
+                }`,
+                cls: 'result-domain'
+            });
+            
+            // Display graph metrics if available
+            if (result.graphMetrics) {
+                const metrics = [
+                    { key: 'degreeCentrality', label: 'Degree' },
+                    { key: 'betweennessCentrality', label: 'Betweenness' },
+                    { key: 'closenessCentrality', label: 'Closeness' },
+                    { key: 'eigenvectorCentrality', label: 'Eigenvector' }
+                ];
+                
+                const metricValues = metrics
+                    .map(metric => {
+                        const value = result.graphMetrics![metric.key as keyof typeof result.graphMetrics];
+                        return value !== undefined && value !== null ? `${metric.label}-${value.toFixed(3)}` : null;
+                    })
+                    .filter(Boolean);
+                
+                if (metricValues.length > 0) {
+                    resultItem.createEl('p', {
+                        text: `Graph Centrality Metrics: ${metricValues.join(', ')}`,
+                        cls: 'result-domain'
+                    });
+                }
+            }
+            
+            const metaContainer = resultItem.createEl('div', {
+                cls: 'result-meta'
+            });
+            
+            metaContainer.createEl('span', {
+                text: `${result.wordCount} words`,
+                cls: 'result-word-count'
+            });
+            
+            // Display dates (created and modified) on the same line
+            const dateInfo = [];
+            if (result.created) {
+                dateInfo.push(`Created: ${new Date(result.created).toLocaleDateString()}`);
+            }
+            if (result.modified) {
+                dateInfo.push(`Modified: ${new Date(result.modified).toLocaleDateString()}`);
+            }
+            if (dateInfo.length > 0) {
+                metaContainer.createEl('span', {
+                    text: ` • ${dateInfo.join(' • ')}`,
+                    cls: 'result-date'
+                });
+            }
+        });
+    }
+
+    private createPaginationControls(parentContainer: HTMLElement, totalPages: number, totalResults: number): void {
+        // Remove existing pagination if it exists
+        if (this.paginationContainer) {
+            this.paginationContainer.remove();
+            this.paginationContainer = null;
+        }
+
+        // Don't show pagination if there's only one page or no results
+        if (totalPages <= 1 || totalResults === 0) {
+            return;
+        }
+
+        // Create pagination container
+        this.paginationContainer = parentContainer.createEl('div', {
+            cls: 'vault-analysis-pagination'
+        });
+
+        // Create pagination controls wrapper
+        const controlsWrapper = this.paginationContainer.createEl('div', {
+            cls: 'pagination-controls'
+        });
+
+        // Previous button
+        const prevButton = controlsWrapper.createEl('button', {
+            text: 'Previous',
+            cls: 'pagination-button pagination-prev'
+        });
+        prevButton.disabled = this.currentPage === 1;
+        prevButton.addEventListener('click', () => {
+            if (this.currentPage > 1) {
+                this.updatePage(this.currentPage - 1);
+            }
+        });
+
+        // Page number buttons
+        const pageNumbersContainer = controlsWrapper.createEl('div', {
+            cls: 'pagination-page-numbers'
+        });
+
+        // Calculate which page numbers to show
+        let startPage = Math.max(1, this.currentPage - 2);
+        let endPage = Math.min(totalPages, this.currentPage + 2);
+
+        // Adjust range if we're near the start or end
+        if (endPage - startPage < 4) {
+            if (startPage === 1) {
+                endPage = Math.min(totalPages, startPage + 4);
+            } else if (endPage === totalPages) {
+                startPage = Math.max(1, endPage - 4);
+            }
+        }
+
+        // Show first page if not in range
+        if (startPage > 1) {
+            const firstButton = pageNumbersContainer.createEl('button', {
+                text: '1',
+                cls: 'pagination-page-number'
+            });
+            firstButton.addEventListener('click', () => {
+                this.updatePage(1);
+            });
+            if (startPage > 2) {
+                pageNumbersContainer.createEl('span', {
+                    text: '...',
+                    cls: 'pagination-ellipsis'
+                });
+            }
+        }
+
+        // Show page numbers in range
+        for (let i = startPage; i <= endPage; i++) {
+            const pageButton = pageNumbersContainer.createEl('button', {
+                text: i.toString(),
+                cls: `pagination-page-number ${i === this.currentPage ? 'active' : ''}`
+            });
+            if (i === this.currentPage) {
+                pageButton.classList.add('active');
+            }
+            pageButton.addEventListener('click', () => {
+                this.updatePage(i);
+            });
+        }
+
+        // Show last page if not in range
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) {
+                pageNumbersContainer.createEl('span', {
+                    text: '...',
+                    cls: 'pagination-ellipsis'
+                });
+            }
+            const lastButton = pageNumbersContainer.createEl('button', {
+                text: totalPages.toString(),
+                cls: 'pagination-page-number'
+            });
+            lastButton.addEventListener('click', () => {
+                this.updatePage(totalPages);
+            });
+        }
+
+        // Next button
+        const nextButton = controlsWrapper.createEl('button', {
+            text: 'Next',
+            cls: 'pagination-button pagination-next'
+        });
+        nextButton.disabled = this.currentPage === totalPages;
+        nextButton.addEventListener('click', () => {
+            if (this.currentPage < totalPages) {
+                this.updatePage(this.currentPage + 1);
+            }
+        });
+
+        // Page info
+        const startIndex = (this.currentPage - 1) * this.itemsPerPage + 1;
+        const endIndex = Math.min(this.currentPage * this.itemsPerPage, totalResults);
+        this.paginationContainer.createEl('div', {
+            text: `Page ${this.currentPage} of ${totalPages} (showing ${startIndex}-${endIndex} of ${totalResults} items)`,
+            cls: 'pagination-info'
+        });
+    }
+
+    private updatePage(newPage: number): void {
+        if (!this.resultsSection || !this.resultsContainer) return;
+
+        // Update current page
+        this.currentPage = newPage;
+
+        // Render new page content
+        this.renderCurrentPage();
+
+        // Update pagination controls
+        const totalPages = Math.ceil(this.filteredResults.length / this.itemsPerPage);
+        const totalResults = this.filteredResults.length;
+        if (this.resultsSection) {
+            // Always recreate pagination controls (simpler and more reliable)
+            if (this.paginationContainer) {
+                this.paginationContainer.remove();
+                this.paginationContainer = null;
+            }
+            this.createPaginationControls(this.resultsSection, totalPages, totalResults);
+        }
+        // No scrolling on page change - users can scroll manually if needed
     }
 
     private showEmptyState(): void {
@@ -396,7 +599,16 @@ export class VaultAnalysisModal extends Modal {
         
         actionButton.addEventListener('click', async () => {
             this.close();
-            await this.vaultSemanticAnalysisManager.generateVaultAnalysis();
+            try {
+                const success = await this.vaultSemanticAnalysisManager.generateVaultAnalysis();
+                // Reopen modal with updated data after analysis completes successfully
+                if (success) {
+                    await this.vaultSemanticAnalysisManager.viewVaultAnalysisResults();
+                }
+            } catch (error) {
+                // Error already shown by generateVaultAnalysis, no need to reopen modal
+                console.error('Vault analysis failed:', error);
+            }
         });
     }
 

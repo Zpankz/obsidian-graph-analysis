@@ -122,16 +122,6 @@ export class GraphView {
     // New tooltip timeout
     private _hideTooltipTimeout: number | null = null;
 
-    // Event handlers
-    private vaultModifyHandler!: (file: TAbstractFile) => void;
-    private vaultCreateHandler!: (file: TAbstractFile) => void;
-    private vaultDeleteHandler!: (file: TAbstractFile) => void;
-    private vaultRenameHandler!: (file: TAbstractFile, oldPath: string) => void;
-    private vaultModifyEventRef: EventRef | null = null;
-    private vaultCreateEventRef: EventRef | null = null;
-    private vaultDeleteEventRef: EventRef | null = null;
-    private vaultRenameEventRef: EventRef | null = null;
-    private debounceTimeout: number | null = null;
 
     // Control panel elements
     private controlPanel!: HTMLElement;
@@ -186,9 +176,6 @@ export class GraphView {
         
         // Setup visibility detection
         this.setupVisibilityObserver();
-        
-        // Setup vault event handlers
-        this.setupVaultEventHandlers();
         
         // Mark container as initialized
         this.container.addClass('graph-initialized');
@@ -1308,6 +1295,27 @@ export class GraphView {
         this.updateDimensions();
         this.recenterGraph();
     }
+
+    /**
+     * Reload vault data and refresh the graph visualization
+     * Called when user switches back to the graph view to ensure data is up to date
+     */
+    public async reloadVaultData(): Promise<void> {
+        // Only reload if the container is visible and connected
+        if (!this.container || !this.container.isConnected) {
+            return;
+        }
+        
+        try {
+            this.showLoadingIndicator();
+            await this.loadVaultData();
+        } catch (error) {
+            console.error('Error reloading vault data:', error);
+            new Notice(`Error reloading graph data: ${(error as Error).message}`);
+        } finally {
+            this.hideLoadingIndicator();
+        }
+    }
     
     public updateSettings(settings: GraphAnalysisSettings): void {
         this.vaultAnalysisManager.updateSettings(settings);
@@ -1446,24 +1454,6 @@ export class GraphView {
     
     public onunload() {
         // Remove vault event handlers
-        if (this.vaultModifyEventRef) {
-            this.app.vault.offref(this.vaultModifyEventRef);
-        }
-        if (this.vaultCreateEventRef) {
-            this.app.vault.offref(this.vaultCreateEventRef);
-        }
-        if (this.vaultDeleteEventRef) {
-            this.app.vault.offref(this.vaultDeleteEventRef);
-        }
-        if (this.vaultRenameEventRef) {
-            this.app.vault.offref(this.vaultRenameEventRef);
-        }
-
-        // Clear any pending debounce timeout
-        if (this.debounceTimeout) {
-            window.clearTimeout(this.debounceTimeout);
-            this.debounceTimeout = null;
-        }
 
         // Cancel any pending timers or animation frames
         if (this._frameRequest) {
@@ -1584,56 +1574,6 @@ export class GraphView {
         }, this.getTooltipSetting('hide-delay'));
     }
 
-    private setupVaultEventHandlers() {
-        // Create handlers that debounce updates
-        this.vaultModifyHandler = (file: TAbstractFile) => {
-            if (file instanceof TFile && file.extension === 'md') {
-                this.debouncedUpdate();
-            }
-        };
-
-        this.vaultCreateHandler = (file: TAbstractFile) => {
-            if (file instanceof TFile && file.extension === 'md') {
-                this.debouncedUpdate();
-            }
-        };
-
-        this.vaultDeleteHandler = (file: TAbstractFile) => {
-            if (file instanceof TFile && file.extension === 'md') {
-                this.debouncedUpdate();
-            }
-        };
-
-        this.vaultRenameHandler = (file: TAbstractFile, oldPath: string) => {
-            if (file instanceof TFile && file.extension === 'md') {
-                this.debouncedUpdate();
-            }
-        };
-
-        // Register the event handlers and store EventRefs for cleanup
-        this.vaultModifyEventRef = this.app.vault.on('modify', this.vaultModifyHandler);
-        this.vaultCreateEventRef = this.app.vault.on('create', this.vaultCreateHandler);
-        this.vaultDeleteEventRef = this.app.vault.on('delete', this.vaultDeleteHandler);
-        this.vaultRenameEventRef = this.app.vault.on('rename', this.vaultRenameHandler);
-    }
-
-    private debouncedUpdate() {
-        // Clear any existing timeout
-        if (this.debounceTimeout) {
-            window.clearTimeout(this.debounceTimeout);
-        }
-
-        // Set a new timeout to update after a delay
-        this.debounceTimeout = window.setTimeout(async () => {
-            try {
-                await this.loadVaultData();
-            } catch (error) {
-                console.error('Error updating graph data:', error);
-                new Notice('Failed to update graph view');
-            }
-            this.debounceTimeout = null;
-        }, 2000); // 2 second debounce delay
-    }
 
     private createControlPanel() {
         // Create control panel container for centrality buttons (right middle)

@@ -31,16 +31,6 @@ export default class GraphAnalysisPlugin extends Plugin {
     vaultAnalysisManager: VaultSemanticAnalysisManager | null = null;
     exclusionUtils: ExclusionUtils | null = null;
     
-    private fileCreatedHandler: ((file: TAbstractFile) => void) | null = null;
-    private fileDeletedHandler: ((file: TAbstractFile) => void) | null = null;
-    private fileModifiedHandler: ((file: TAbstractFile) => void) | null = null;
-    private metadataChangedHandler: ((file: TFile) => void) | null = null;
-    
-    private graphDataNeedsRefresh: boolean = false;
-    private refreshDebounceTimeout: NodeJS.Timeout | null = null;
-    private lastRefreshTime: number = 0;
-    private readonly MIN_REFRESH_INTERVAL = 5000;
-    
     private wasmLoadingPromise: Promise<void> | null = null;
     private wasmLoadingNotice: Notice | null = null;
 
@@ -55,10 +45,9 @@ export default class GraphAnalysisPlugin extends Plugin {
         // Initialize WASM module with improved async handling
         this.initializeWasmModule();
         
-        // Register event handlers for vault changes after plugin is fully loaded
+        // Mark plugin as loaded (event listeners removed - graph only updates when explicitly opened)
         this.app.workspace.onLayoutReady(() => {
             this.pluginIsLoaded = true;
-            this.registerVaultEventListeners();
         });
         
         // Register the graph analysis view
@@ -294,112 +283,9 @@ export default class GraphAnalysisPlugin extends Plugin {
         return this.wasmLoadingPromise!;
     }
 
-    private registerVaultEventListeners() {
-        this.fileCreatedHandler = (file: TAbstractFile) => {
-            if (!this.pluginIsLoaded) return;
-            
-            if (file instanceof TFile && file.extension === 'md' && !this.isFileExcluded(file)) {
-                this.scheduleGraphDataRefresh('File created');
-            }
-        };
-        
-        this.fileDeletedHandler = (file: TAbstractFile) => {
-            if (!this.pluginIsLoaded) return;
-            
-            if (file instanceof TFile && file.extension === 'md') {
-                this.scheduleGraphDataRefresh('File deleted');
-            }
-        };
-        
-        this.fileModifiedHandler = (file: TAbstractFile) => {
-            if (!this.pluginIsLoaded) return;
-            
-            if (file instanceof TFile && file.extension === 'md' && !this.isFileExcluded(file)) {
-                this.scheduleGraphDataRefresh('File modified');
-            }
-        };
-        
-        this.metadataChangedHandler = (file: TFile) => {
-            if (!this.pluginIsLoaded) return;
-            
-            if (file.extension === 'md' && !this.isFileExcluded(file)) {
-                this.scheduleGraphDataRefresh('Metadata changed');
-            }
-        };
-        
-        this.registerEvent(this.app.vault.on('create', this.fileCreatedHandler));
-        this.registerEvent(this.app.vault.on('delete', this.fileDeletedHandler));
-        this.registerEvent(this.app.vault.on('modify', this.fileModifiedHandler));
-        this.registerEvent(this.app.metadataCache.on('changed', this.metadataChangedHandler));
-    }
-
-    private scheduleGraphDataRefresh(reason: string) {
-        this.graphDataNeedsRefresh = true;
-        
-        if (this.refreshDebounceTimeout) {
-            clearTimeout(this.refreshDebounceTimeout);
-        }
-        
-        const now = Date.now();
-        const timeSinceLastRefresh = now - this.lastRefreshTime;
-        const timeToWait = Math.max(0, this.MIN_REFRESH_INTERVAL - timeSinceLastRefresh);
-        
-        this.refreshDebounceTimeout = setTimeout(() => {
-            this.refreshGraphDataIfNeeded(reason);
-        }, timeToWait + 1000);
-    }
-
-    private async refreshGraphDataIfNeeded(reason: string) {
-        if (!this.graphDataNeedsRefresh || !this.graphView) {
-            return;
-        }
-        
-        if (this.graphView) {
-            try {
-                await this.ensureWasmLoaded();
-                
-                const { graphData, degreeCentrality } = await this.initializeGraphAndCalculateCentrality();
-                
-                // Convert the raw graph data to the format expected by updateData
-                const nodes = graphData.nodes.map((nodePath: string, index: number) => {
-                    const fileName = nodePath.split('/').pop() || nodePath;
-                    const displayName = fileName.replace('.md', '');
-                    
-                    const nodeData = degreeCentrality?.find(r => r?.node_id === index);
-                    const degreeCentralityScore = nodeData && nodeData.centrality && nodeData.centrality.degree !== undefined
-                        ? nodeData.centrality.degree 
-                        : 0;
-                    
-                    return {
-                        id: index.toString(),
-                        name: displayName,
-                        path: nodePath,
-                        degreeCentrality: degreeCentralityScore,
-                    };
-                });
-                
-                const links = graphData.edges.map(([sourceIdx, targetIdx]) => ({
-                    source: sourceIdx.toString(),
-                    target: targetIdx.toString()
-                }));
-                
-                await this.graphView.updateData({ nodes, links });
-                
-                this.graphDataNeedsRefresh = false;
-                this.lastRefreshTime = Date.now();
-            } catch (error) {
-                console.error('Failed to refresh graph data:', error);
-            }
-        }
-    }
 
     onunload() {
         console.log('Unloading Graph Analysis plugin');
-        
-        if (this.refreshDebounceTimeout) {
-            clearTimeout(this.refreshDebounceTimeout);
-            this.refreshDebounceTimeout = null;
-        }
         
         if (this.wasmLoadingNotice) {
             this.wasmLoadingNotice.hide();
@@ -420,11 +306,6 @@ export default class GraphAnalysisPlugin extends Plugin {
         
         this.wasmInitialized = false;
         this.wasmLoadingPromise = null;
-        
-        this.fileCreatedHandler = null;
-        this.fileDeletedHandler = null;
-        this.fileModifiedHandler = null;
-        this.metadataChangedHandler = null;
         
         const leaves = this.app.workspace.getLeavesOfType(GRAPH_ANALYSIS_VIEW_TYPE);
         for (const leaf of leaves) {
