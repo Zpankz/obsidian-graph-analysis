@@ -13,6 +13,7 @@ import {
 import { KnowledgeActionsData } from './visualization/KnowledgeActionsManager';
 import { DDCHelper } from './DDCHelper';
 import { KDECalculationService } from '../utils/KDECalculationService';
+import { AIContextPreparationService } from '../services/AIContextPreparationService';
 
 
 export interface VaultAnalysisResult {
@@ -227,24 +228,27 @@ export class MasterAnalysisManager {
             console.log('Generating Knowledge Structure Analysis with structured output...');
             
 
-            //TODO: We need to extract most important info from vault data, some fields can be excluded while sending to AI model.
             const analysisData = await this.loadVaultAnalysisData();
             if (!analysisData) {
                 throw new Error('No vault analysis data found. Please generate vault analysis first.');
             }
             
+            // Prepare optimized context for AI
+            const contextService = new AIContextPreparationService();
+            const optimizedContext = contextService.prepareOptimizedContext(analysisData);
+            
             // Calculate comprehensive statistics for centrality scores
             const kdeService = new KDECalculationService();
             const comprehensiveStats = kdeService.getComprehensiveStats(analysisData);
             
+            // Format optimized context for AI consumption
+            const formattedContext = contextService.formatForAI(optimizedContext, comprehensiveStats);
+            
             // Build the system, context, and instruction like in test-ai-model.js
             const system = "You are an expert in knowledge management. You are highly skilled in applying graph theory and network analysis to knowledge graphs. Use your expertise to extract insights from the provided context which contains knowledge domains and centrality rankings. Please focus on network analysis and determining knowledge gaps.";
             
-            const context = `VAULT ANALYSIS DATA:
-${JSON.stringify(analysisData)}
-
-CENTRALITY DISTRIBUTION ANALYSIS (Comprehensive Statistics):
-${comprehensiveStats}`;
+            const context = `VAULT ANALYSIS DATA (Optimized):
+${formattedContext}`;
             
             const instruction = `Analyze the vault data to identify key knowledge domains using network centrality metrics. Return a JSON object matching the required schema.
 

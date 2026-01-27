@@ -6,7 +6,7 @@ import {
 } from '../../components/domain-distribution/DomainDistributionChart';
 // import { MasterAnalysisManager } from '../MasterAnalysisManager';
 import { DDCHelper } from '../DDCHelper';
-import { KDECalculationService } from '../../utils/KDECalculationService';
+import { KDECalculationService, StructuredCentralityStats } from '../../utils/KDECalculationService';
 import { CentralityKDEChart } from '../../components/kde-chart/CentralityKDEChart';
 import { VaultAnalysisData } from '../MasterAnalysisManager';
 
@@ -425,10 +425,96 @@ export class KnowledgeStructureManager {
                 height: 400
             });
             chart.render();
+
+            // Add insights panel with statistics
+            const structuredStats = kdeService.getStructuredStats(analysisData);
+            this.renderInsightsPanel(chartContainer, structuredStats);
         } catch (error) {
             console.error('Failed to render centrality distribution chart:', error);
             // Silently fail - don't break the UI if chart fails
         }
+    }
+
+    /**
+     * Render insights panel with statistical information below the chart
+     */
+    private renderInsightsPanel(container: HTMLElement, stats: StructuredCentralityStats): void {
+        // Create insights container
+        const insightsContainer = container.createEl('div', { cls: 'kde-chart-insights' });
+        insightsContainer.style.marginTop = '20px';
+
+        // Define centrality types with their icons
+        const centralityTypes = [
+            { key: 'betweenness' as const, name: 'Betweenness Centrality', icon: 'git-branch' },
+            { key: 'closeness' as const, name: 'Closeness Centrality', icon: 'target' },
+            { key: 'eigenvector' as const, name: 'Eigenvector Centrality', icon: 'star' }
+        ];
+
+        // Render insight card for each centrality type
+        centralityTypes.forEach(({ key, name, icon }) => {
+            const stat = stats[key];
+            if (!stat) return; // Skip if no data
+
+            // Create insight card
+            const card = insightsContainer.createEl('div', { cls: 'kde-chart-insight-card' });
+            card.style.background = 'var(--background-secondary-alt)';
+            card.style.borderRadius = '8px';
+            card.style.padding = '12px';
+
+            // Header with icon and name
+            const header = card.createEl('div', { cls: 'kde-chart-insight-header' });
+            header.style.display = 'flex';
+            header.style.alignItems = 'center';
+            header.style.gap = '8px';
+            header.style.marginBottom = '8px';
+
+            const iconEl = header.createEl('div', { cls: 'kde-chart-insight-icon' });
+            iconEl.style.display = 'flex';
+            iconEl.style.alignItems = 'center';
+            iconEl.style.justifyContent = 'center';
+            iconEl.style.width = '20px';
+            iconEl.style.height = '20px';
+            iconEl.style.color = 'var(--text-accent)';
+            iconEl.style.flexShrink = '0';
+            setIcon(iconEl, icon);
+
+            const titleEl = header.createEl('span', { cls: 'kde-chart-insight-title' });
+            titleEl.textContent = name;
+            titleEl.style.fontSize = '14px';
+            titleEl.style.fontWeight = '600';
+            titleEl.style.color = 'var(--text-normal)';
+
+            // Stats line
+            const statsLine = card.createEl('div', { cls: 'kde-chart-insight-stats' });
+            statsLine.style.fontSize = '13px';
+            statsLine.style.color = 'var(--text-muted)';
+            statsLine.style.marginBottom = '8px';
+            statsLine.style.display = 'flex';
+            statsLine.style.flexWrap = 'wrap';
+            statsLine.style.gap = '12px';
+
+            // Format stats
+            const statsParts = [
+                `N=${stat.count}`,
+                `Mean: ${stat.mean.toFixed(3)}`,
+                `Range: ${stat.range.min.toFixed(2)}-${stat.range.max.toFixed(2)}`,
+                stat.distribution
+            ];
+            statsParts.forEach((part, index) => {
+                const span = statsLine.createEl('span');
+                span.textContent = part;
+                if (index < statsParts.length - 1) {
+                    span.style.marginRight = '8px';
+                }
+            });
+
+            // Interpretation (mandatory)
+            const interpretationEl = card.createEl('div', { cls: 'kde-chart-insight-interpretation' });
+            interpretationEl.textContent = stat.interpretation;
+            interpretationEl.style.fontSize = '13px';
+            interpretationEl.style.color = 'var(--text-normal)';
+            interpretationEl.style.lineHeight = '1.5';
+        });
     }
 
     /**

@@ -1334,6 +1334,65 @@
     font-size: 14px;
 }
 
+/* KDE Chart Insights Panel */
+.kde-chart-insights {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: row;
+    gap: 12px;
+    align-items: stretch; /* Ensures equal heights */
+}
+
+.kde-chart-insight-card {
+    background: var(--background-secondary-alt);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 0; /* Remove bottom margin */
+    flex: 1; /* Equal width distribution */
+    min-width: 0; /* Prevents flex items from overflowing */
+    display: flex;
+    flex-direction: column; /* Stack content vertically within card */
+}
+
+.kde-chart-insight-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.kde-chart-insight-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    color: var(--text-accent);
+    flex-shrink: 0;
+}
+
+.kde-chart-insight-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-normal);
+}
+
+.kde-chart-insight-stats {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.kde-chart-insight-interpretation {
+    font-size: 13px;
+    color: var(--text-normal);
+    line-height: 1.5;
+    flex-grow: 1; /* Allows interpretation to fill remaining space */
+}
+
 .vault-analysis-results {
     margin: 0;
 }

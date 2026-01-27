@@ -23,6 +23,23 @@ export interface CentralityHistogramResult {
     upperBound: number; // Rounded upper bound for x-axis
 }
 
+export interface CentralityStats {
+    name: string;  // "Betweenness", "Closeness", "Eigenvector"
+    count: number;
+    mean: number;
+    median: number;
+    range: { min: number; max: number };
+    distribution: string;  // "Right-skewed", "Symmetric", etc.
+    modality: string;      // "unimodal", "bimodal", etc.
+    interpretation: string;  // The plain language interpretation
+}
+
+export interface StructuredCentralityStats {
+    betweenness: CentralityStats | null;
+    closeness: CentralityStats | null;
+    eigenvector: CentralityStats | null;
+}
+
 export class KDECalculationService {
     /**
      * Calculate KDE distributions for all centrality types
@@ -389,6 +406,7 @@ export class KDECalculationService {
 
     /**
      * Generate plain language interpretation of centrality distribution
+     * Always generates exactly 3 sentences for consistent length
      */
     private generateInterpretation(
         centralityName: string,
@@ -409,7 +427,7 @@ export class KDECalculationService {
 
         const context = centralityContext[centralityName as keyof typeof centralityContext] || 'nodes';
 
-        // Distribution concentration
+        // 1. Distribution concentration (always included)
         const coefficientOfVariation = stdDev / mean;
         if (coefficientOfVariation < 0.3) {
             interpretations.push(`Most notes have similar ${centralityName.toLowerCase()} scores (highly concentrated)`);
@@ -419,14 +437,17 @@ export class KDECalculationService {
             interpretations.push(`Wide variation in ${centralityName.toLowerCase()} scores (highly dispersed)`);
         }
 
-        // Skewness interpretation
+        // 2. Skewness interpretation (always included with fallback)
         if (skewness > 1) {
             interpretations.push(`Most notes have low ${centralityName.toLowerCase()} (few high-value ${context})`);
         } else if (skewness < -1) {
             interpretations.push(`Most notes have high ${centralityName.toLowerCase()} (few low-value ${context})`);
+        } else {
+            // Fallback for balanced skewness
+            interpretations.push(`Distribution shows balanced spread across score ranges`);
         }
 
-        // Percentile insights
+        // 3. Percentile insights (always included with fallback)
         const p75 = percentiles[3];
         const p25 = percentiles[1];
         const iqr = p75 - p25;
@@ -434,8 +455,93 @@ export class KDECalculationService {
             interpretations.push(`Scores are tightly clustered around the median`);
         } else if (iqr > mean * 0.8) {
             interpretations.push(`Significant spread in scores, indicating diverse network roles`);
+        } else {
+            // Fallback for moderate IQR
+            interpretations.push(`Score distribution shows moderate variability`);
         }
 
         return interpretations.join('. ') + '.';
+    }
+
+    /**
+     * Generate structured statistics for UI display
+     * Returns structured data instead of text string
+     */
+    public getStructuredStats(analysisData: VaultAnalysisData): StructuredCentralityStats {
+        // Calculate KDE for peak detection
+        const kdeResults = this.calculateKDEDistributions(analysisData);
+
+        // Process each centrality type
+        const centralityTypes = [
+            { name: 'Betweenness', key: 'betweennessCentrality' as const, kdeData: kdeResults.betweenness, resultKey: 'betweenness' as const },
+            { name: 'Closeness', key: 'closenessCentrality' as const, kdeData: kdeResults.closeness, resultKey: 'closeness' as const },
+            { name: 'Eigenvector', key: 'eigenvectorCentrality' as const, kdeData: kdeResults.eigenvector, resultKey: 'eigenvector' as const }
+        ];
+
+        const result: StructuredCentralityStats = {
+            betweenness: null,
+            closeness: null,
+            eigenvector: null
+        };
+
+        for (const { name, key, kdeData, resultKey } of centralityTypes) {
+            const values = this.extractCentralityValues(analysisData, key);
+
+            if (values.length === 0) {
+                continue; // Leave as null
+            }
+
+            // Basic Statistics
+            const count = values.length;
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            const mean = ss.mean(values);
+            const median = ss.median(values);
+            const stdDev = ss.standardDeviation(values);
+
+            // Distribution Shape (Skewness)
+            let skewness: number;
+            try {
+                skewness = ss.sampleSkewness(values);
+            } catch {
+                skewness = this.calculateSkewness(values, mean, stdDev);
+            }
+
+            const skewnessDesc = skewness > 0.5 ? 'Right-skewed' : skewness < -0.5 ? 'Left-skewed' : 'Symmetric';
+
+            // KDE Modality
+            let modality = 'unimodal';
+            if (kdeData.x.length > 0 && kdeData.y.length > 0) {
+                const peakCount = this.countPeaks(kdeData.y);
+                modality = peakCount === 1 ? 'unimodal' : peakCount === 2 ? 'bimodal' : `multimodal (${peakCount} peaks)`;
+            }
+
+            // Percentiles for interpretation
+            const percentiles = [10, 25, 50, 75, 90, 95];
+            const sortedValues = values.slice().sort((a, b) => a - b);
+            const percentileValues = percentiles.map(p => {
+                try {
+                    return ss.quantileSorted(sortedValues, p / 100);
+                } catch {
+                    return ss.quantile(values, p / 100);
+                }
+            });
+
+            // Interpretation
+            const interpretation = this.generateInterpretation(name, mean, median, stdDev, skewness, percentileValues);
+
+            result[resultKey] = {
+                name,
+                count,
+                mean,
+                median,
+                range: { min, max },
+                distribution: skewnessDesc,
+                modality,
+                interpretation
+            };
+        }
+
+        return result;
     }
 }
