@@ -1,5 +1,6 @@
 import { App, Modal, setIcon, Notice, TFile } from 'obsidian';
 import { KnowledgeCalendarChart } from '../components/calendar-chart/KnowledgeCalendarChart';
+import { ConnectivityScatterChart } from '../components/scatter-chart/ConnectivityScatterChart';
 import { 
     VaultAnalysisData, 
     VaultAnalysisResult, 
@@ -166,7 +167,7 @@ export class VaultAnalysisModal extends Modal {
                 await this.loadKnowledgeEvolutionView();
                 break;
             case 'actions':
-                this.loadRecommendedActionsView();
+                await this.loadRecommendedActionsView();
                 break;
             default:
                 this.loadSemanticAnalysisView();
@@ -1196,7 +1197,7 @@ export class VaultAnalysisModal extends Modal {
     }
 
 
-    private loadRecommendedActionsView(): void {
+    private async loadRecommendedActionsView(): Promise<void> {
         // Create the main container with a scrollable layout
         const recommendationsSection = this.contentContainer.createEl('div', { 
             cls: 'recommended-actions-container' 
@@ -1234,6 +1235,114 @@ export class VaultAnalysisModal extends Modal {
             return;
         }
         
+        // Add connectivity scatter chart section (always displayed, like domain chart)
+        const chartSection = recommendationsSection.createEl('div', { 
+            cls: 'vault-analysis-section' 
+        });
+        
+        chartSection.createEl('h3', {
+            text: 'Note Connectivity Analysis',
+            cls: 'vault-analysis-section-title'
+        });
+
+        // Create tabs container adjacent to chart
+        const chartWrapper = chartSection.createEl('div', { 
+            cls: 'scatter-chart-wrapper' 
+        });
+
+        const tabsContainer = chartWrapper.createEl('div', { 
+            cls: 'knowledge-network-tab-bar' 
+        });
+        // Tab bar settings - same as Knowledge Network Analysis tabs
+        // Ensure tabs are displayed horizontally (flex row) and aligned left
+        tabsContainer.style.display = 'flex';
+        tabsContainer.style.flexDirection = 'row';
+        tabsContainer.style.gap = '3px';
+        tabsContainer.style.alignSelf = 'flex-start';
+        tabsContainer.style.marginBottom = '3px'; // Same spacing as Knowledge Network tabs
+
+        // Create tabs with icons matching Knowledge Network Analysis style
+        const linksTab = tabsContainer.createEl('button', {
+            cls: 'knowledge-network-tab active'
+        });
+        linksTab.style.display = 'flex';
+        linksTab.style.alignItems = 'center';
+        linksTab.style.gap = '8px';
+        linksTab.style.padding = '8px 16px';
+        linksTab.style.border = 'none';
+        linksTab.style.background = 'transparent';
+        linksTab.style.cursor = 'pointer';
+        linksTab.style.fontSize = '14px';
+        linksTab.style.transition = 'all 0.2s ease';
+        linksTab.style.color = 'var(--text-accent)';
+        linksTab.style.fontWeight = '600';
+        linksTab.style.borderBottom = '2px solid var(--text-accent)';
+        
+        const linksIcon = linksTab.createEl('span');
+        setIcon(linksIcon, 'link');
+        linksTab.createEl('span', { text: 'Inbound vs Outbound Links' });
+
+        const centralityTab = tabsContainer.createEl('button', {
+            cls: 'knowledge-network-tab'
+        });
+        centralityTab.style.display = 'flex';
+        centralityTab.style.alignItems = 'center';
+        centralityTab.style.gap = '8px';
+        centralityTab.style.padding = '8px 16px';
+        centralityTab.style.border = 'none';
+        centralityTab.style.background = 'transparent';
+        centralityTab.style.cursor = 'pointer';
+        centralityTab.style.fontSize = '14px';
+        centralityTab.style.transition = 'all 0.2s ease';
+        centralityTab.style.color = 'var(--text-muted)';
+        centralityTab.style.fontWeight = '400';
+        centralityTab.style.borderBottom = '2px solid transparent';
+        
+        const centralityIcon = centralityTab.createEl('span');
+        setIcon(centralityIcon, 'activity');
+        centralityTab.createEl('span', { text: 'Betweenness vs Eigenvector' });
+
+        const chartContainer = chartWrapper.createEl('div', { 
+            cls: 'connectivity-chart-section' 
+        });
+
+        // Create and render scatter chart
+        const scatterChart = new ConnectivityScatterChart(
+            this.app,
+            chartContainer,
+            { 
+                width: 700, 
+                height: 500,
+                mode: 'links',
+                analysisData: this.analysisData,  // For centrality mode
+                modal: this  // Pass modal reference to close on note click
+            }
+        );
+        await scatterChart.render();
+
+        // Handle tab clicks with proper styling updates
+        const updateTabStyles = (activeTab: HTMLElement, inactiveTab: HTMLElement) => {
+            activeTab.style.color = 'var(--text-accent)';
+            activeTab.style.fontWeight = '600';
+            activeTab.style.borderBottom = '2px solid var(--text-accent)';
+            activeTab.addClass('active');
+            
+            inactiveTab.style.color = 'var(--text-muted)';
+            inactiveTab.style.fontWeight = '400';
+            inactiveTab.style.borderBottom = '2px solid transparent';
+            inactiveTab.removeClass('active');
+        };
+
+        linksTab.addEventListener('click', async () => {
+            updateTabStyles(linksTab, centralityTab);
+            await scatterChart.setMode('links');
+        });
+
+        centralityTab.addEventListener('click', async () => {
+            updateTabStyles(centralityTab, linksTab);
+            await scatterChart.setMode('centrality');
+        });
+
         // Check for cached tab-specific analysis
         this.loadActionsAnalysisData().then(hasData => {
             if (hasData) {

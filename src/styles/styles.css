@@ -1441,6 +1441,70 @@
     flex-grow: 1; /* Allows interpretation to fill remaining space */
 }
 
+/* Connectivity Scatter Chart Styles */
+.scatter-chart-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;  /* Align tabs to left */
+    width: 100%;
+}
+
+/* Scatter chart tabs use knowledge-network-tab-bar style (defined elsewhere) */
+
+.connectivity-chart-section {
+    margin: 0;
+    padding: 20px 20px 10px 20px; /* Reduced bottom padding */
+    background: var(--background-primary);
+    border-radius: 8px;
+    border: 1px solid var(--background-modifier-border);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    min-height: 540px; /* Increased to accommodate explanation text with spacing */
+    height: auto; /* Auto-fit content */
+}
+
+.scatter-chart-no-data {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 40px 20px;
+    font-size: 14px;
+    width: 100%;
+}
+
+.scatter-quadrant-lines {
+    pointer-events: none;
+}
+
+.scatter-quadrant-labels {
+    pointer-events: none;
+}
+
+.scatter-dot {
+    transition: r 0.2s ease, opacity 0.2s ease;
+}
+
+.scatter-dot:hover {
+    cursor: pointer;
+}
+
+.scatter-tooltip {
+    position: absolute;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    padding: 8px 12px;
+    font-size: var(--font-ui-small);
+    color: var(--text-normal);
+    box-shadow: var(--shadow-s);
+    z-index: 1000;
+    pointer-events: none;
+    white-space: nowrap;
+    max-width: 300px;
+}
+
 .vault-analysis-results {
     margin: 0;
 }

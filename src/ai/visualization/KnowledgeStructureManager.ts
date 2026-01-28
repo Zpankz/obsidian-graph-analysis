@@ -546,27 +546,30 @@ export class KnowledgeStructureManager {
             }
         ];
 
-        // Create unified container (tabs + content together, no spacing)
+        // Create unified container (tabs + content together)
         const tabsContainer = document.createElement('div');
         tabsContainer.className = 'knowledge-network-tabs-container';
         tabsContainer.style.width = '100%';
         tabsContainer.style.marginBottom = '30px';
         section.appendChild(tabsContainer);
 
-        // Create tab bar (integrated at top, no margin)
+        // Create tab bar - same settings as scatter plot tabs
         const tabBar = document.createElement('div');
         tabBar.className = 'knowledge-network-tab-bar';
+        // Ensure tabs are displayed horizontally (flex row) and aligned left
         tabBar.style.display = 'flex';
-        tabBar.style.gap = '8px';
-        tabBar.style.paddingBottom = '0'; // No padding to eliminate gap
+        tabBar.style.flexDirection = 'row';
+        tabBar.style.gap = '3px';
+        tabBar.style.alignSelf = 'flex-start';
+        tabBar.style.marginBottom = '3px'; // Same spacing as scatter plot tabs
         tabsContainer.appendChild(tabBar);
 
-        // Create content container (directly below tabs, no spacing)
+        // Create content container - consistent spacing with scatter plot
         const contentContainer = document.createElement('div');
         contentContainer.className = 'knowledge-network-tab-content';
         contentContainer.style.width = '100%';
-        contentContainer.style.marginTop = '0'; // Ensure no margin
-        contentContainer.style.paddingTop = '0'; // Ensure no padding
+        contentContainer.style.marginTop = '0'; // No margin, spacing handled by tabBar marginBottom
+        contentContainer.style.paddingTop = '0'; // No padding
         tabsContainer.appendChild(contentContainer);
 
         // Cache references for tab buttons and panels
