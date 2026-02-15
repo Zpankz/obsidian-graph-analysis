@@ -2608,6 +2608,299 @@ button.is-disabled {
     font-weight: var(--font-medium);
 }
 
+/* ═══════════════════════════════════════════════════════
+   Review Cards Grid (Knowledge Maintenance)
+   ═══════════════════════════════════════════════════════ */
+
+.review-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-top: 12px;
+}
+
+@media (max-width: 900px) {
+    .review-cards-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 600px) {
+    .review-cards-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.review-card {
+    padding: 16px;
+    background: var(--background-primary);
+    border-radius: 10px;
+    border: 1px solid var(--background-modifier-border);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: relative;
+    overflow: hidden;
+}
+
+.review-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    border-radius: 10px 0 0 10px;
+}
+
+.review-card.priority-high::before {
+    background: var(--color-red);
+}
+
+.review-card.priority-medium::before {
+    background: var(--color-orange);
+}
+
+.review-card.priority-low::before {
+    background: var(--color-green);
+}
+
+.review-card:hover {
+    border-color: var(--text-accent);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+    transform: translateY(-2px);
+}
+
+.theme-dark .review-card:hover {
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+.review-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.review-card-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-normal);
+    line-height: 1.3;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+
+.review-card-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    letter-spacing: 0.5px;
+}
+
+.badge-high {
+    background: var(--color-red);
+    color: var(--text-on-accent);
+}
+
+.badge-medium {
+    background: var(--color-orange);
+    color: var(--text-on-accent);
+}
+
+.badge-low {
+    background: var(--color-green);
+    color: var(--text-on-accent);
+}
+
+.review-card-reason {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+}
+
+.review-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.review-card-modified,
+.review-card-role {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-faint);
+}
+
+.review-card-icon {
+    display: flex;
+    align-items: center;
+}
+
+.review-card-icon svg {
+    width: 12px;
+    height: 12px;
+}
+
+.review-card-role.role-bridge {
+    color: var(--color-purple);
+}
+
+.review-card-role.role-authority {
+    color: var(--color-yellow);
+}
+
+.review-card-role.role-hub {
+    color: var(--color-blue);
+}
+
+/* ═══════════════════════════════════════════════════════
+   Connection Sub-graph
+   ═══════════════════════════════════════════════════════ */
+
+.connection-subgraph-container {
+    margin-top: 12px;
+    position: relative;
+}
+
+.subgraph-svg-wrapper {
+    background: var(--background-secondary);
+    border-radius: 10px;
+    border: 1px solid var(--background-modifier-border);
+    overflow: hidden;
+}
+
+.connection-subgraph-svg {
+    display: block;
+}
+
+/* Tooltip */
+.subgraph-tooltip {
+    position: absolute;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--text-normal);
+    line-height: 1.5;
+    pointer-events: none;
+    z-index: 100;
+    max-width: 280px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.theme-dark .subgraph-tooltip {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* Legend */
+.subgraph-legend {
+    display: flex;
+    gap: 20px;
+    padding: 10px 16px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+.subgraph-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.legend-dot {
+    width: 16px;
+    height: 3px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.legend-dot.legend-link {
+    background: var(--text-accent);
+    border-top: 2px dashed var(--text-accent);
+    height: 0;
+}
+
+.legend-dot.legend-node {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--interactive-accent);
+}
+
+.legend-dot.legend-confidence {
+    background: var(--text-accent);
+    height: 4px;
+    width: 24px;
+    background: linear-gradient(to right, rgba(var(--text-accent-rgb, 100, 100, 255), 0.3), var(--text-accent));
+}
+
+/* Button section */
+.subgraph-button-section {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 0 4px;
+    gap: 16px;
+}
+
+.subgraph-counter {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.subgraph-add-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
+    font-size: 14px;
+}
+
+.subgraph-btn-icon {
+    display: flex;
+    align-items: center;
+}
+
+.subgraph-btn-icon svg {
+    width: 16px;
+    height: 16px;
+}
+
+.subgraph-btn-done {
+    opacity: 0.6;
+    cursor: default;
+}
+
+/* Node labels in SVG */
+.subgraph-node-label {
+    font-family: var(--font-interface);
+    user-select: none;
+}
+
 /* Learning Paths */
 .learning-paths-list {
     display: flex;

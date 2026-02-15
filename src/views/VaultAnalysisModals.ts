@@ -1,6 +1,7 @@
 import { App, Modal, setIcon, Notice, TFile } from 'obsidian';
 import { KnowledgeCalendarChart } from '../components/calendar-chart/KnowledgeCalendarChart';
 import { ConnectivityScatterChart } from '../components/scatter-chart/ConnectivityScatterChart';
+import { ConnectionSubGraph } from '../components/connection-subgraph/ConnectionSubGraph';
 import { 
     VaultAnalysisData, 
     VaultAnalysisResult, 
@@ -11,6 +12,7 @@ import {
 } from '../ai/MasterAnalysisManager';
 import { KnowledgeEvolutionData } from '../ai/visualization/KnowledgeEvolutionManager';
 import { KnowledgeStructureManager } from '../ai/visualization/KnowledgeStructureManager';
+import { KnowledgeActionsManager, ReviewCandidate } from '../ai/visualization/KnowledgeActionsManager';
 import { GraphAnalysisSettings } from '../types/types';
 
 // Import type for the manager
@@ -1458,55 +1460,139 @@ export class VaultAnalysisModal extends Modal {
                            
         if (!actionsData) return;
 
-        // Knowledge Maintenance Section
+        // ── Knowledge Maintenance: Review Cards Grid ──
         if (actionsData.maintenance && actionsData.maintenance.length > 0) {
             const maintenanceSection = container.createEl('div', { cls: 'vault-analysis-section' });
             maintenanceSection.createEl('h3', {
-                text: 'Knowledge Maintenance',
+                text: 'Notes Needing Review',
                 cls: 'vault-analysis-section-title'
             });
-            
-            const maintenanceList = maintenanceSection.createEl('div', { cls: 'actions-list' });
-            actionsData.maintenance.slice(0, 10).forEach((action: any) => {
-                const actionItem = maintenanceList.createEl('div', { cls: 'action-item' });
-                actionItem.innerHTML = `
-                    <div class="action-title">${action.title || action.action || 'Maintenance Action'}</div>
-                    <div class="action-description">${action.reason || action.description || ''}</div>
-                    <div class="action-priority">${action.priority || 'medium'}</div>
-                `;
-            });
+
+            // Compute hybrid-scored review candidates
+            const analysisResults = this.analysisData?.results || [];
+            const candidates = KnowledgeActionsManager.computeReviewCandidates(
+                actionsData.maintenance,
+                analysisResults,
+                9 // 3 rows x 3 columns
+            );
+
+            this.renderReviewCardsGrid(maintenanceSection, candidates);
         }
 
-        // Connection Recommendations Section
+        // ── Connection Recommendations: Interactive Sub-graph ──
         if (actionsData.connections && actionsData.connections.length > 0) {
             const connectionsSection = container.createEl('div', { cls: 'vault-analysis-section' });
             connectionsSection.createEl('h3', {
-                text: 'Connection Recommendations',
+                text: 'Suggested Connections',
                 cls: 'vault-analysis-section-title'
             });
+
+            const subgraphContainer = connectionsSection.createEl('div', {
+                cls: 'connection-subgraph-container'
+            });
+
+            // Create and render the connection sub-graph
+            const subGraph = new ConnectionSubGraph(
+                this.app,
+                subgraphContainer,
+                actionsData.connections,
+                { modal: this }
+            );
+            subGraph.render();
+        }
+    }
+
+    /**
+     * Render the 3-column review cards grid for maintenance candidates.
+     * Each card is clickable and opens the note in a new Obsidian tab.
+     */
+    private renderReviewCardsGrid(container: HTMLElement, candidates: ReviewCandidate[]): void {
+        const grid = container.createEl('div', { cls: 'review-cards-grid' });
+
+        for (const candidate of candidates) {
+            const card = grid.createEl('div', { cls: `review-card priority-${candidate.priority}` });
+            card.setAttribute('data-path', candidate.path);
+            card.setAttribute('title', `Click to open "${candidate.title}" in a new tab`);
+
+            // Card header: title + priority badge
+            const header = card.createEl('div', { cls: 'review-card-header' });
+            const titleEl = header.createEl('span', {
+                text: candidate.title,
+                cls: 'review-card-title'
+            });
+            const badge = header.createEl('span', {
+                text: candidate.priority.toUpperCase(),
+                cls: `review-card-badge badge-${candidate.priority}`
+            });
+
+            // Reason
+            const reasonEl = card.createEl('div', {
+                text: candidate.reason,
+                cls: 'review-card-reason'
+            });
+
+            // Footer: last modified + centrality role
+            const footer = card.createEl('div', { cls: 'review-card-footer' });
             
-            const connectionsList = connectionsSection.createEl('div', { cls: 'actions-list' });
-            actionsData.connections.slice(0, 10).forEach((connection: any) => {
-                const connectionItem = connectionsList.createEl('div', { cls: 'action-item' });
-                connectionItem.innerHTML = `
-                    <div class="action-title">${connection.title || connection.suggestion || 'Connection Suggestion'}</div>
-                    <div class="action-description">${connection.reason || connection.description || ''}</div>
-                    <div class="action-notes">${connection.notes ? connection.notes.join(', ') : ''}</div>
-                `;
+            // Last modified relative time
+            if (candidate.lastModified) {
+                const modifiedEl = footer.createEl('span', { cls: 'review-card-modified' });
+                const iconSpan = modifiedEl.createEl('span', { cls: 'review-card-icon' });
+                setIcon(iconSpan, 'clock');
+                modifiedEl.createEl('span', {
+                    text: this.getRelativeTime(candidate.lastModified)
+                });
+            }
+
+            // Centrality role indicator
+            if (candidate.centralityRole !== 'normal') {
+                const roleEl = footer.createEl('span', { cls: `review-card-role role-${candidate.centralityRole}` });
+                const roleIcon = candidate.centralityRole === 'bridge' ? 'git-branch' 
+                    : candidate.centralityRole === 'authority' ? 'star'
+                    : 'share-2'; // hub
+                const roleIconSpan = roleEl.createEl('span', { cls: 'review-card-icon' });
+                setIcon(roleIconSpan, roleIcon);
+                roleEl.createEl('span', {
+                    text: candidate.centralityRole.charAt(0).toUpperCase() + candidate.centralityRole.slice(1)
+                });
+            }
+
+            // Click handler: open note in new tab
+            card.addEventListener('click', async () => {
+                // Close modal and open the note in a new tab
+                this.close();
+                await this.app.workspace.openLinkText(candidate.path, '', 'tab');
             });
         }
+    }
+
+    /**
+     * Convert an ISO date string to a human-readable relative time (e.g., "3 months ago")
+     */
+    private getRelativeTime(isoDate: string): string {
+        const date = new Date(isoDate);
+        const now = new Date();
+        const diffMs = now.getTime() - date.getTime();
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+        if (diffDays < 1) return 'Today';
+        if (diffDays === 1) return 'Yesterday';
+        if (diffDays < 7) return `${diffDays} days ago`;
+        if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
+        if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`;
+        return `${Math.floor(diffDays / 365)} years ago`;
     }
 
     private showActionsEmptyState(container: HTMLElement): void {
         // Placeholders for each actions category (titles + purpose)
         const categories: Array<{ title: string; message: string }> = [
             {
-                title: 'Knowledge Maintenance',
-                message: 'Generate analysis to surface notes that may need review, updates, or cleanup.'
+                title: 'Notes Needing Review',
+                message: 'Generate analysis to identify important notes (hubs, bridges, authorities) that need review. Results are shown as interactive cards you can click to open.'
             },
             {
-                title: 'Connection Recommendations',
-                message: 'Generate analysis to suggest links between related concepts and notes.'
+                title: 'Suggested Connections',
+                message: 'Generate analysis to discover missing links between related notes. Results are shown as an interactive graph you can edit before adding connections to your vault.'
             }
         ];
 

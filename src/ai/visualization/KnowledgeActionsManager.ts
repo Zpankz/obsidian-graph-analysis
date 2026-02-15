@@ -1,5 +1,6 @@
-import { App } from 'obsidian';
+import { App, TFile, Notice } from 'obsidian';
 import { GraphAnalysisSettings } from '../../types/types';
+import type { VaultAnalysisResult } from '../MasterAnalysisManager';
 
 // Interfaces for Knowledge Actions data
 export interface MaintenanceAction {
@@ -8,6 +9,24 @@ export interface MaintenanceAction {
     reason: string;
     priority: 'high' | 'medium' | 'low';
     action: string;
+}
+
+/**
+ * A review candidate combines rule-based urgency scoring with AI insights.
+ * Used to populate the review cards grid on the Recommended Actions page.
+ */
+export interface ReviewCandidate {
+    noteId: string;
+    title: string;
+    path: string;
+    reason: string;
+    priority: 'high' | 'medium' | 'low';
+    action: string;
+    lastModified: string;           // ISO date string
+    urgencyScore: number;           // Composite score (0-1)
+    centralityRole: 'hub' | 'bridge' | 'authority' | 'normal';
+    centralityScore: number;        // Max centrality value for display
+    fromAI: boolean;                // Whether this was also identified by AI
 }
 
 export interface ConnectionSuggestion {
@@ -523,5 +542,239 @@ export class KnowledgeActionsManager {
 
     public updateSettings(settings: GraphAnalysisSettings): void {
         this.settings = settings;
+    }
+
+    /**
+     * Compute hybrid urgency-scored review candidates by combining:
+     * - Rule-based signals: centrality (hub/bridge/authority importance) + staleness (time since modified)
+     * - AI signals: maintenance priority, reason, and action from AI analysis
+     * 
+     * Returns up to `limit` candidates sorted by descending urgency score.
+     */
+    public static computeReviewCandidates(
+        maintenance: MaintenanceAction[],
+        analysisResults: VaultAnalysisResult[],
+        limit: number = 9
+    ): ReviewCandidate[] {
+        const CENTRALITY_WEIGHT = 0.4;
+        const STALENESS_WEIGHT = 0.3;
+        const AI_PRIORITY_WEIGHT = 0.3;
+
+        // Build a lookup from noteId/path -> VaultAnalysisResult
+        const resultsByPath = new Map<string, VaultAnalysisResult>();
+        for (const r of analysisResults) {
+            resultsByPath.set(r.path, r);
+            // Also index by id in case noteId doesn't match path exactly
+            resultsByPath.set(r.id, r);
+        }
+
+        // Build AI maintenance lookup by noteId
+        const aiByNoteId = new Map<string, MaintenanceAction>();
+        for (const m of maintenance) {
+            aiByNoteId.set(m.noteId, m);
+        }
+
+        // Collect all candidate note paths (union of AI maintenance + high-centrality notes)
+        const candidatePaths = new Set<string>();
+        for (const m of maintenance) {
+            candidatePaths.add(m.noteId);
+        }
+        // Add top centrality notes that might not be in AI list
+        const centralityScored = analysisResults
+            .filter(r => r.graphMetrics)
+            .map(r => ({
+                path: r.path,
+                maxCentrality: Math.max(
+                    r.graphMetrics?.betweennessCentrality ?? 0,
+                    r.graphMetrics?.eigenvectorCentrality ?? 0,
+                    r.graphMetrics?.degreeCentrality ?? 0
+                )
+            }))
+            .sort((a, b) => b.maxCentrality - a.maxCentrality);
+        
+        // Add top 20 centrality notes as rule-based candidates
+        for (const item of centralityScored.slice(0, 20)) {
+            candidatePaths.add(item.path);
+        }
+
+        // Find max centrality and max staleness for normalization
+        const now = Date.now();
+        let maxCentrality = 0;
+        let maxStalenessMs = 1; // avoid division by zero
+        for (const path of candidatePaths) {
+            const result = resultsByPath.get(path);
+            if (result?.graphMetrics) {
+                const mc = Math.max(
+                    result.graphMetrics.betweennessCentrality ?? 0,
+                    result.graphMetrics.eigenvectorCentrality ?? 0,
+                    result.graphMetrics.degreeCentrality ?? 0
+                );
+                if (mc > maxCentrality) maxCentrality = mc;
+            }
+            if (result?.modified) {
+                const age = now - new Date(result.modified).getTime();
+                if (age > maxStalenessMs) maxStalenessMs = age;
+            }
+        }
+        if (maxCentrality === 0) maxCentrality = 1;
+
+        // Score each candidate
+        const candidates: ReviewCandidate[] = [];
+        for (const path of candidatePaths) {
+            const result = resultsByPath.get(path);
+            const aiAction = aiByNoteId.get(path);
+
+            // Centrality score (normalized 0-1)
+            const betweenness = result?.graphMetrics?.betweennessCentrality ?? 0;
+            const eigenvector = result?.graphMetrics?.eigenvectorCentrality ?? 0;
+            const degree = result?.graphMetrics?.degreeCentrality ?? 0;
+            const rawCentrality = Math.max(betweenness, eigenvector, degree);
+            const normalizedCentrality = rawCentrality / maxCentrality;
+
+            // Determine centrality role
+            let centralityRole: ReviewCandidate['centralityRole'] = 'normal';
+            if (betweenness > 0 && betweenness >= eigenvector && betweenness >= degree) {
+                centralityRole = 'bridge';
+            } else if (eigenvector > 0 && eigenvector >= betweenness && eigenvector >= degree) {
+                centralityRole = 'authority';
+            } else if (degree > 0) {
+                centralityRole = 'hub';
+            }
+
+            // Staleness score (normalized 0-1, older = higher)
+            const modified = result?.modified ? new Date(result.modified).getTime() : now;
+            const stalenessMs = now - modified;
+            const normalizedStaleness = stalenessMs / maxStalenessMs;
+
+            // AI priority score (0-1)
+            let aiPriorityScore = 0;
+            if (aiAction) {
+                aiPriorityScore = aiAction.priority === 'high' ? 1.0 
+                    : aiAction.priority === 'medium' ? 0.6 
+                    : 0.3;
+            }
+
+            // Composite urgency score
+            const urgencyScore = 
+                CENTRALITY_WEIGHT * normalizedCentrality +
+                STALENESS_WEIGHT * normalizedStaleness +
+                AI_PRIORITY_WEIGHT * aiPriorityScore;
+
+            const title = aiAction?.title || result?.title || path.split('/').pop()?.replace('.md', '') || path;
+            const reason = aiAction?.reason || KnowledgeActionsManager.generateRuleBasedReason(centralityRole, stalenessMs, normalizedCentrality);
+            const priority = aiAction?.priority || (urgencyScore > 0.65 ? 'high' : urgencyScore > 0.35 ? 'medium' : 'low');
+            const action = aiAction?.action || '';
+
+            candidates.push({
+                noteId: path,
+                title,
+                path: result?.path || path,
+                reason,
+                priority,
+                action,
+                lastModified: result?.modified || '',
+                urgencyScore,
+                centralityRole,
+                centralityScore: rawCentrality,
+                fromAI: !!aiAction
+            });
+        }
+
+        // Sort by urgency descending, take top N
+        candidates.sort((a, b) => b.urgencyScore - a.urgencyScore);
+        return candidates.slice(0, limit);
+    }
+
+    /**
+     * Generate a human-readable reason for rule-based candidates (no AI reason available)
+     */
+    private static generateRuleBasedReason(
+        role: ReviewCandidate['centralityRole'],
+        stalenessMs: number,
+        normalizedCentrality: number
+    ): string {
+        const days = Math.floor(stalenessMs / (1000 * 60 * 60 * 24));
+        const roleLabel = role === 'bridge' ? 'a key bridge between topics'
+            : role === 'authority' ? 'a highly-referenced authority note'
+            : role === 'hub' ? 'a well-connected hub note'
+            : 'a note in your vault';
+
+        if (days > 180 && normalizedCentrality > 0.5) {
+            return `This is ${roleLabel} that hasn't been updated in ${days} days. Its high importance makes it a priority for review.`;
+        } else if (days > 180) {
+            return `This note hasn't been modified in ${days} days and may need a review to stay current.`;
+        } else if (normalizedCentrality > 0.5) {
+            return `This is ${roleLabel} with high centrality. Consider reviewing to ensure it remains accurate.`;
+        }
+        return `This is ${roleLabel} that could benefit from a review.`;
+    }
+
+    /**
+     * Write [[link]] connections into source notes for the given connection suggestions.
+     * Appends a "Related Notes" section at the end of the source file (or after frontmatter).
+     */
+    public static async writeConnectionsToNotes(
+        app: App,
+        connections: ConnectionSuggestion[]
+    ): Promise<{ written: number; failed: number }> {
+        let written = 0;
+        let failed = 0;
+
+        // Group connections by source to batch writes per file
+        const bySource = new Map<string, ConnectionSuggestion[]>();
+        for (const conn of connections) {
+            const list = bySource.get(conn.sourceId) || [];
+            list.push(conn);
+            bySource.set(conn.sourceId, list);
+        }
+
+        for (const [sourceId, conns] of bySource) {
+            try {
+                const file = app.vault.getAbstractFileByPath(sourceId);
+                if (!(file instanceof TFile)) {
+                    console.warn(`Source file not found: ${sourceId}`);
+                    failed += conns.length;
+                    continue;
+                }
+
+                const content = await app.vault.read(file);
+                
+                // Build link lines
+                const linkLines = conns.map(c => {
+                    const targetName = c.targetId.split('/').pop()?.replace('.md', '') || c.targetId;
+                    return `- [[${targetName}]]`;
+                });
+
+                const newSection = `\n\n## Related Notes\n${linkLines.join('\n')}\n`;
+                
+                // Check if there's already a "Related Notes" section
+                const relatedNotesRegex = /\n## Related Notes\n/;
+                let newContent: string;
+                if (relatedNotesRegex.test(content)) {
+                    // Append links to existing section (before the next ## heading or end of file)
+                    const insertPos = content.search(/\n## Related Notes\n/);
+                    const afterSection = content.indexOf('\n## ', insertPos + 1);
+                    if (afterSection > insertPos + 20) {
+                        // Insert before the next heading
+                        const existingSection = content.slice(insertPos, afterSection);
+                        newContent = content.slice(0, insertPos) + existingSection + linkLines.join('\n') + '\n' + content.slice(afterSection);
+                    } else {
+                        // Append at end
+                        newContent = content + '\n' + linkLines.join('\n') + '\n';
+                    }
+                } else {
+                    // Append new section at end of file
+                    newContent = content + newSection;
+                }
+
+                await app.vault.modify(file, newContent);
+                written += conns.length;
+            } catch (error) {
+                console.error(`Failed to write connections to ${sourceId}:`, error);
+                failed += conns.length;
+            }
+        }
+
+        return { written, failed };
     }
 }

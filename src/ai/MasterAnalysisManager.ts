@@ -559,16 +559,21 @@ ${formattedContext}`;
    - High priority: Orphan notes, important notes with zero inbound links, critical bridges/authorities that are underlinked
    - Medium priority: Isolated notes, integration opportunities, notes needing updates
    - Low priority: Notes that could benefit from minor improvements
+   - Limit to the top 12 most impactful maintenance items.
+   - Provide a concise reason (1-2 sentences) and a specific action for each.
 
 2. For connection recommendations, provide:
-   - Clear reason why the connection makes sense
+   - sourceId: the note that will RECEIVE the new link (we will add [[target]] inside this note)
+   - targetId: the note being linked to
+   - Clear, concise reason (1-2 sentences) why the connection makes sense
    - Confidence score (0.0-1.0) based on how strong the connection rationale is
    - Focus on high-value connections (integration opportunities, domain bridges)
+   - Limit to the top 20 highest-value connection suggestions.
 
-3. Use only notes and data explicitly present in the vault data - do not invent notes or paths
-4. Ensure noteId, sourceId, and targetId are valid paths from the vault analysis
-5. Provide specific, actionable recommendations grounded in the connectivity and centrality patterns
-6. For learningPaths and organization, return empty arrays (to be implemented in future)`;
+3. Use only notes and data explicitly present in the vault data - do not invent notes or paths.
+4. Use the EXACT path format from the vault data (e.g. "Folder/Note.md") for noteId, sourceId, and targetId.
+5. Provide specific, actionable recommendations grounded in the connectivity and centrality patterns.
+6. For learningPaths and organization, return empty arrays (to be implemented in future).`;
 
             // Combine system, context, and instruction
             const prompt = `${system}\n\n${context}\n\n${instruction}`;
