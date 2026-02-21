@@ -34,8 +34,6 @@
     font-weight: 600;
     color: var(--text-normal);
     margin-bottom: 16px;
-    border-bottom: 1px solid var(--background-modifier-border);
-    padding-bottom: 8px;
 }
 
 /* Section container */
@@ -481,8 +479,6 @@
 
 .metadata-section-title {
   margin: 12px 0 8px 0;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--background-modifier-border);
 }
 
 /* Tags */
@@ -1197,7 +1193,6 @@ button.is-disabled {
     flex-direction: column;
     gap: 16px;
     padding-bottom: 16px;
-    border-bottom: 2px solid var(--background-modifier-border);
     margin-bottom: 16px;
 }
 
