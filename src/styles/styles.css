@@ -971,13 +971,41 @@
   overflow-y: auto;
 }
 
-/* Exclusion Statistics Styles */
-.exclusion-stats {
-  margin-top: 10px;
-  padding: 15px;
+/* Plugin Settings Page - Obsidian-style structure */
+/* Section title: standalone on main background */
+.graph-settings-section-title {
+  margin: 18px 0 8px 0;
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+
+.graph-settings-section-title:first-child {
+  margin-top: 0;
+}
+
+/* Section container: rounded box with splitters between items */
+.graph-settings-section-container {
   background-color: var(--background-secondary);
   border-radius: var(--radius-m);
   border: 1px solid var(--background-modifier-border);
+  overflow: hidden;
+  margin-bottom: 24px;
+}
+
+.graph-settings-section-container .setting-item {
+  border-top: 1px solid var(--background-modifier-border);
+  padding: 12px 16px;
+}
+
+.graph-settings-section-container .setting-item:first-child {
+  border-top: none;
+}
+
+/* Exclusion stats: inside container with splitter above */
+.graph-settings-section-container .exclusion-stats {
+  border-top: 1px solid var(--background-modifier-border);
+  padding: 12px 16px;
 }
 
 .stats-container {

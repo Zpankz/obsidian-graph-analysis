@@ -14,11 +14,13 @@ export class GraphAnalysisSettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
 
-        containerEl.createEl('h2', { text: 'Graph Analysis Settings' });
+        // Exclude Notes from Analysis section
+        containerEl.createEl('h3', { text: 'Exclude Notes from Analysis', cls: 'graph-settings-section-title' });
+        const exclusionContainer = containerEl.createDiv({ cls: 'graph-settings-section-container' });
 
-        new Setting(containerEl)
+        new Setting(exclusionContainer)
             .setName('Exclude Folders')
-            .setDesc('Folders to exclude from analysis (comma-separated). Use folder paths like "Archive", "Templates", "Private/Personal"')
+            .setDesc('Use folder paths like "Archive", "Templates", "Private/Personal"')
             .addText(text => text
                 .setPlaceholder('Archive,Templates,Private/Personal')
                 .setValue(this.plugin.settings.excludeFolders.join(','))
@@ -28,9 +30,9 @@ export class GraphAnalysisSettingTab extends PluginSettingTab {
                     this.updateExclusionStats();
                 }));
 
-        new Setting(containerEl)
+        new Setting(exclusionContainer)
             .setName('Exclude Tags')
-            .setDesc('Tags to exclude from analysis (comma-separated). Use tag names without # like "private", "draft", "archive"')
+            .setDesc('Use tag names without # like "private", "draft", "archive"')
             .addText(text => text
                 .setPlaceholder('private,draft,archive')
                 .setValue(this.plugin.settings.excludeTags.join(','))
@@ -40,12 +42,24 @@ export class GraphAnalysisSettingTab extends PluginSettingTab {
                     this.updateExclusionStats();
                 }));
 
-        // AI Summary Settings
-        containerEl.createEl('h3', { text: 'AI Summary Settings' });
+        // Exclusion statistics (inline under Exclude Notes from Analysis)
+        this.createExclusionStatsSection(exclusionContainer);
 
-        new Setting(containerEl)
+        // LLM Model Configuration section
+        containerEl.createEl('h3', { text: 'LLM Model Configuration', cls: 'graph-settings-section-title' });
+        const apiContainer = containerEl.createDiv({ cls: 'graph-settings-section-container' });
+
+        new Setting(apiContainer)
             .setName('Gemini API Key')
-            .setDesc('Your Google Gemini API key for AI-powered summaries')
+            .setDesc(createFragment((frag: DocumentFragment) => {
+                frag.appendText('Your Google Gemini API key. ');
+                const link = frag.createEl('a', {
+                    text: 'Get an API key',
+                    href: 'https://aistudio.google.com/apikey',
+                });
+                link.setAttribute('target', '_blank');
+                link.setAttribute('rel', 'noopener');
+            }))
             .addText(text => {
                 text.setPlaceholder('Enter your Gemini API key')
                     .setValue(this.plugin.settings.geminiApiKey)
@@ -57,14 +71,9 @@ export class GraphAnalysisSettingTab extends PluginSettingTab {
                 text.inputEl.type = 'password';
                 return text;
             });
-
-        // Add exclusion statistics section
-        this.createExclusionStatsSection(containerEl);
     }
 
     private createExclusionStatsSection(containerEl: HTMLElement): void {
-        containerEl.createEl('h3', { text: 'Exclusion Statistics' });
-        
         this.exclusionStatsEl = containerEl.createDiv({ cls: 'exclusion-stats' });
         this.updateExclusionStats();
     }
@@ -81,28 +90,18 @@ export class GraphAnalysisSettingTab extends PluginSettingTab {
             
             const statsContainer = this.exclusionStatsEl.createDiv({ cls: 'stats-container' });
             
-            statsContainer.createDiv({ 
-                text: `Total files in vault: ${stats.totalFiles}`,
-                cls: 'stat-item'
-            });
+            const excludedParts: string[] = [];
+            if (stats.excludedByFolder > 0) excludedParts.push(`${stats.excludedByFolder} by folder`);
+            if (stats.excludedByTag > 0) excludedParts.push(`${stats.excludedByTag} by tag`);
+            const excludedBreakdown = excludedParts.length > 0 ? ` (${excludedParts.join(', ')})` : '';
             
             statsContainer.createDiv({ 
-                text: `Files excluded by folder rules: ${stats.excludedByFolder}`,
-                cls: 'stat-item'
-            });
-            
-            statsContainer.createDiv({ 
-                text: `Files excluded by tag rules: ${stats.excludedByTag}`,
-                cls: 'stat-item'
-            });
-            
-            statsContainer.createDiv({ 
-                text: `Total excluded files: ${stats.totalExcluded}`,
+                text: `Excluded notes: ${stats.totalExcluded}${excludedBreakdown}`,
                 cls: 'stat-item excluded-total'
             });
             
             statsContainer.createDiv({ 
-                text: `Files included in analysis: ${stats.includedFiles}`,
+                text: `Notes included in analysis: ${stats.includedFiles}/${stats.totalFiles}`,
                 cls: 'stat-item included-total'
             });
 
