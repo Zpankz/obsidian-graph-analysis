@@ -21,8 +21,8 @@
     --graph-link-color-highlighted: var(--interactive-accent);
     --graph-link-opacity-default: 1;
     --graph-link-opacity-dimmed: 0.3;
-    --graph-link-width-default: 1px;
-    --graph-link-width-highlighted: 1.2px;
+    --graph-link-width-default: 0.6px;
+    --graph-link-width-highlighted: 0.72px;
 
     /* Label states */
     --graph-label-color: var(--text-muted);

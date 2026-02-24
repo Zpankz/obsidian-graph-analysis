@@ -153,6 +153,13 @@ export class GraphView {
     // Add this as a class property after the NODE constant
     private nodeRadiusScale: d3.ScaleThreshold<number, number> | null = null;
 
+    // Display toggles for labels and arrows
+    private showNodeLabels: boolean = true;
+    private showArrows: boolean = true;
+    private markerIdDefault: string = '';
+    private markerIdHighlighted: string = '';
+    private labelsSelection!: d3.Selection<SVGTextElement, SimulationGraphNode, d3.BaseType, unknown>;
+
     constructor(app: App, settings: GraphAnalysisSettings) {
         this.app = app;
         
@@ -216,6 +223,44 @@ export class GraphView {
 
         // Create the main SVG group
         this.svgGroup = this.svg.append('g');
+
+        // Arrow markers for directional links (source -> target)
+        const defs = this.svg.append('defs');
+        const markerAttrs = {
+            markerUnits: 'userSpaceOnUse',
+            markerWidth: 4,
+            markerHeight: 4,
+            refX: 3,
+            refY: 0,
+            orient: 'auto',
+            viewBox: '0 -2 4 4'
+        };
+        this.markerIdDefault = `graph-arrow-default-${Date.now()}`;
+        defs.append('marker')
+            .attr('id', this.markerIdDefault)
+            .attr('markerUnits', markerAttrs.markerUnits)
+            .attr('markerWidth', markerAttrs.markerWidth)
+            .attr('markerHeight', markerAttrs.markerHeight)
+            .attr('refX', markerAttrs.refX)
+            .attr('refY', markerAttrs.refY)
+            .attr('orient', markerAttrs.orient)
+            .attr('viewBox', markerAttrs.viewBox)
+            .append('path')
+            .attr('d', 'M0,-1.5 L4,0 L0,1.5 Z')
+            .attr('fill', 'var(--graph-link-color-default)');
+        this.markerIdHighlighted = `graph-arrow-highlighted-${Date.now()}`;
+        defs.append('marker')
+            .attr('id', this.markerIdHighlighted)
+            .attr('markerUnits', markerAttrs.markerUnits)
+            .attr('markerWidth', markerAttrs.markerWidth)
+            .attr('markerHeight', markerAttrs.markerHeight)
+            .attr('refX', markerAttrs.refX)
+            .attr('refY', markerAttrs.refY)
+            .attr('orient', markerAttrs.orient)
+            .attr('viewBox', markerAttrs.viewBox)
+            .append('path')
+            .attr('d', 'M0,-1.5 L4,0 L0,1.5 Z')
+            .attr('fill', 'var(--graph-link-color-highlighted)');
         
         // Create groups for links and nodes
         const linksGroup = this.svgGroup.append('g')
@@ -229,9 +274,12 @@ export class GraphView {
             .style('fill', 'var(--graph-node-color-default)')
             .style('opacity', 'var(--graph-node-opacity-default)');
 
+        const labelsGroup = this.svgGroup.append('g').attr('class', 'labels-group');
+
         // Initialize selections
         this.linksSelection = linksGroup.selectAll('line');
         this.nodesSelection = nodesGroup.selectAll('circle');
+        this.labelsSelection = labelsGroup.selectAll('text');
         
         // Initialize force simulation
         this.initializeSimulation();
@@ -323,7 +371,6 @@ export class GraphView {
             })
             .on('end', () => {
                 this.container.removeClass('zooming');
-                this.restartSimulationGently();
             });
         
         // Enable zoom and pan
@@ -379,6 +426,44 @@ export class GraphView {
             console.error("Error restarting simulation:", e);
         }
     }
+
+    /** Shorten link to node edge so arrow sits adjacent to circle, not hidden behind it */
+    private linkStartX(d: SimulationGraphLink): number {
+        const s = d.source as SimulationGraphNode;
+        const t = d.target as SimulationGraphNode;
+        const sx = s.x ?? 0, sy = s.y ?? 0, tx = t.x ?? 0, ty = t.y ?? 0;
+        const dx = tx - sx, dy = ty - sy;
+        const len = Math.hypot(dx, dy) || 1;
+        const nx = dx / len;
+        return sx + nx * this.getNodeRadius(s);
+    }
+    private linkStartY(d: SimulationGraphLink): number {
+        const s = d.source as SimulationGraphNode;
+        const t = d.target as SimulationGraphNode;
+        const sx = s.x ?? 0, sy = s.y ?? 0, tx = t.x ?? 0, ty = t.y ?? 0;
+        const dx = tx - sx, dy = ty - sy;
+        const len = Math.hypot(dx, dy) || 1;
+        const ny = dy / len;
+        return sy + ny * this.getNodeRadius(s);
+    }
+    private linkEndX(d: SimulationGraphLink): number {
+        const s = d.source as SimulationGraphNode;
+        const t = d.target as SimulationGraphNode;
+        const sx = s.x ?? 0, sy = s.y ?? 0, tx = t.x ?? 0, ty = t.y ?? 0;
+        const dx = tx - sx, dy = ty - sy;
+        const len = Math.hypot(dx, dy) || 1;
+        const nx = dx / len;
+        return tx - nx * this.getNodeRadius(t);
+    }
+    private linkEndY(d: SimulationGraphLink): number {
+        const s = d.source as SimulationGraphNode;
+        const t = d.target as SimulationGraphNode;
+        const sx = s.x ?? 0, sy = s.y ?? 0, tx = t.x ?? 0, ty = t.y ?? 0;
+        const dx = tx - sx, dy = ty - sy;
+        const len = Math.hypot(dx, dy) || 1;
+        const ny = dy / len;
+        return ty - ny * this.getNodeRadius(t);
+    }
     
     private updateGraph() {
         // Cache selection references for performance
@@ -388,17 +473,32 @@ export class GraphView {
         // Safety check - if selections don't exist, exit early
         if (!linksSelection || !nodesSelection) return;
         
-        // Update link positions
-        linksSelection
-            .attr('x1', d => (d.source as unknown as SimulationGraphNode).x || 0)
-            .attr('y1', d => (d.source as unknown as SimulationGraphNode).y || 0)
-            .attr('x2', d => (d.target as unknown as SimulationGraphNode).x || 0)
-            .attr('y2', d => (d.target as unknown as SimulationGraphNode).y || 0);
+        // Update link positions (edge-to-edge when arrows enabled, center-to-center otherwise)
+        if (this.showArrows) {
+            linksSelection
+                .attr('x1', d => this.linkStartX(d))
+                .attr('y1', d => this.linkStartY(d))
+                .attr('x2', d => this.linkEndX(d))
+                .attr('y2', d => this.linkEndY(d));
+        } else {
+            linksSelection
+                .attr('x1', d => (d.source as unknown as SimulationGraphNode).x || 0)
+                .attr('y1', d => (d.source as unknown as SimulationGraphNode).y || 0)
+                .attr('x2', d => (d.target as unknown as SimulationGraphNode).x || 0)
+                .attr('y2', d => (d.target as unknown as SimulationGraphNode).y || 0);
+        }
             
         // Update node positions
         nodesSelection
             .attr('cx', d => d.x || 0)
             .attr('cy', d => d.y || 0);
+
+        // Update label positions
+        if (this.labelsSelection && !this.labelsSelection.empty()) {
+            this.labelsSelection
+                .attr('x', d => d.x || 0)
+                .attr('y', d => (d.y || 0) + this.getNodeRadius(d) + 5);
+        }
     }
     
     private updateDimensions() {
@@ -874,17 +974,23 @@ export class GraphView {
             }
         });
         
+        const showArrows = this.showArrows;
+        const markerIdDefault = this.markerIdDefault;
+        const markerIdHighlighted = this.markerIdHighlighted;
         this.linksSelection.each(function(d) {
             const sourceId = typeof d.source === 'string' ? d.source : (d.source as unknown as SimulationGraphNode).id;
             const targetId = typeof d.target === 'string' ? d.target : (d.target as unknown as SimulationGraphNode).id;
             const isConnected = sourceId === nodeId || targetId === nodeId;
             
-            d3.select(this)
+            const sel = d3.select(this)
                 .transition()
                 .duration(animationDuration)
                 .style('stroke', isConnected ? 'var(--graph-link-color-highlighted)' : 'var(--graph-link-color-default)')
                 .style('stroke-width', isConnected ? 'var(--graph-link-width-highlighted)' : 'var(--graph-link-width-default)')
                 .style('stroke-opacity', isConnected ? 'var(--graph-link-opacity-default)' : 'var(--graph-link-opacity-dimmed)');
+            if (showArrows) {
+                sel.attr('marker-end', isConnected ? `url(#${markerIdHighlighted})` : `url(#${markerIdDefault})`);
+            }
         });
     }
     
@@ -921,7 +1027,8 @@ export class GraphView {
             .duration(animationDuration)
             .style('stroke-opacity', 'var(--graph-link-opacity-default)')
             .style('stroke-width', 'var(--graph-link-width-default)')
-            .style('stroke', 'var(--graph-link-color-default)');
+            .style('stroke', 'var(--graph-link-color-default)')
+            .attr('marker-end', this.showArrows ? `url(#${this.markerIdDefault})` : null);
     }
     
     private setupDragBehavior() {
@@ -1131,14 +1238,19 @@ export class GraphView {
         // Create D3 selections for the graph elements
         this.linksSelection = this.svgGroup.select('.links-group')
             .selectAll<SVGLineElement, SimulationGraphLink>('line')
-            .data(this.links, d => `${d.source}-${d.target}`)
+            .data(this.links, (d: SimulationGraphLink) => {
+                const sid = typeof d.source === 'string' ? d.source : (d.source as SimulationGraphNode).id;
+                const tid = typeof d.target === 'string' ? d.target : (d.target as SimulationGraphNode).id;
+                return `${sid}-${tid}`;
+            })
             .join(
                 enter => enter.append('line')
                     .style('stroke', 'var(--graph-link-color-default)')
                     .style('stroke-width', 'var(--graph-link-width-default)')
                     .style('stroke-opacity', 'var(--graph-link-opacity-default)')
-                    .attr('class', 'graph-link'),
-                update => update,
+                    .attr('class', 'graph-link')
+                    .attr('marker-end', this.showArrows ? `url(#${this.markerIdDefault})` : null),
+                update => update.attr('marker-end', this.showArrows ? `url(#${this.markerIdDefault})` : null),
                 exit => exit.remove()
             );
 
@@ -1162,6 +1274,37 @@ export class GraphView {
                     return nodeEnter;
                 },
                 update => update,
+                exit => exit.remove()
+            );
+
+        // Create/update labels in labels group
+        this.labelsSelection = this.svgGroup.select('.labels-group')
+            .selectAll<SVGTextElement, SimulationGraphNode>('text')
+            .data(this.nodes, d => d.id)
+            .join(
+                enter => {
+                    const textEnter = enter.append('text')
+                        .attr('class', 'graph-node-label-svg')
+                        .attr('text-anchor', 'middle')
+                        .attr('x', d => d.x ?? 0)
+                        .attr('y', d => (d.y ?? 0) + this.getNodeRadius(d) + 5)
+                        .text(d => {
+                        const name = d.name ?? '';
+                        if (name.length > 30) return name.slice(0, 27) + '...';
+                        return name;
+                    })
+                        .style('pointer-events', 'none');
+                    if (!this.showNodeLabels) textEnter.style('display', 'none');
+                    return textEnter;
+                },
+                update => {
+                    const textUpdate = update
+                        .attr('x', d => d.x ?? 0)
+                        .attr('y', d => (d.y ?? 0) + this.getNodeRadius(d) + 5);
+                    if (this.showNodeLabels) textUpdate.style('display', null);
+                    else textUpdate.style('display', 'none');
+                    return textUpdate;
+                },
                 exit => exit.remove()
             );
 
@@ -1551,6 +1694,8 @@ export class GraphView {
             this.nodesSelection = undefined;
             // @ts-ignore - we're intentionally clearing the selections
             this.linksSelection = undefined;
+            // @ts-ignore - we're intentionally clearing the selections
+            this.labelsSelection = undefined;
             // @ts-ignore - explicitly break circular references
             this.svg = null;
         }
@@ -1610,6 +1755,32 @@ export class GraphView {
 
         const dropdown = this.container.createDiv({ cls: 'color-settings-dropdown' });
         dropdown.style.display = 'none';
+
+        // Display toggles section
+        const displaySection = dropdown.createDiv({ cls: 'graph-settings-display-section' });
+        displaySection.createDiv({ cls: 'graph-settings-section-title', text: 'Display' });
+
+        const labelsRow = displaySection.createDiv({ cls: 'graph-settings-toggle-row' });
+        labelsRow.createDiv({ cls: 'graph-settings-toggle-label', text: 'Labels' });
+        const labelsTrack = labelsRow.createDiv({ cls: 'graph-settings-toggle-switch' });
+        const labelsToggle = labelsTrack.createDiv({ cls: `toggle-track ${this.showNodeLabels ? 'active' : ''}` });
+        labelsToggle.createDiv({ cls: 'toggle-handle' });
+        labelsToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleNodeLabels(!this.showNodeLabels);
+            labelsToggle.classList.toggle('active', this.showNodeLabels);
+        });
+
+        const arrowsRow = displaySection.createDiv({ cls: 'graph-settings-toggle-row' });
+        arrowsRow.createDiv({ cls: 'graph-settings-toggle-label', text: 'Arrows' });
+        const arrowsTrack = arrowsRow.createDiv({ cls: 'graph-settings-toggle-switch' });
+        const arrowsToggle = arrowsTrack.createDiv({ cls: `toggle-track ${this.showArrows ? 'active' : ''}` });
+        arrowsToggle.createDiv({ cls: 'toggle-handle' });
+        arrowsToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleArrows(!this.showArrows);
+            arrowsToggle.classList.toggle('active', this.showArrows);
+        });
 
         // Create gradient selectors for each centrality type
         this.centralityTypes.forEach(type => {
@@ -1827,6 +1998,25 @@ export class GraphView {
         document.addEventListener('click', () => {
             dropdown.style.display = 'none';
         });
+    }
+
+    private toggleNodeLabels(enabled: boolean): void {
+        this.showNodeLabels = enabled;
+        if (this.labelsSelection && !this.labelsSelection.empty()) {
+            if (enabled) {
+                this.labelsSelection.style('display', null);
+            } else {
+                this.labelsSelection.style('display', 'none');
+            }
+        }
+    }
+
+    private toggleArrows(enabled: boolean): void {
+        this.showArrows = enabled;
+        if (this.linksSelection && !this.linksSelection.empty()) {
+            this.linksSelection.attr('marker-end', enabled ? `url(#${this.markerIdDefault})` : null);
+        }
+        this.updateGraph();
     }
 
     private updateGradientPreview(element: HTMLElement, paletteName: string, type?: typeof this.centralityTypes[number]) {

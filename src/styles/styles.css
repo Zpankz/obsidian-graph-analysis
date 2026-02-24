@@ -804,6 +804,98 @@
   overflow-y: auto;
 }
 
+/* Display toggles section */
+.graph-settings-display-section {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.graph-settings-section-title {
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-medium);
+  color: var(--text-normal);
+  margin-bottom: 9px;
+}
+
+.graph-settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  width: 100%;
+}
+
+.graph-settings-toggle-row:last-child {
+  margin-bottom: 0;
+}
+
+.graph-settings-toggle-label {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  text-align: left;
+  flex: 0 0 auto;
+  padding-left: 8px;
+}
+
+.graph-settings-toggle-switch {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Switch track - oval, light gray when off */
+.toggle-track {
+  width: 51px;
+  height: 21px;
+  border-radius: 10.5px;
+  background: var(--background-modifier-border);
+  cursor: pointer;
+  position: relative;
+  padding: 2px;
+  box-shadow: none;
+  border: 1px solid var(--background-modifier-border);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.toggle-track:hover {
+  background: var(--background-modifier-border-hover);
+}
+
+.toggle-track.active {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+
+/* Switch handle - white circle */
+.toggle-handle {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  box-shadow: none;
+  transition: transform 0.2s ease;
+}
+
+.toggle-track.active .toggle-handle {
+  transform: translateX(28px);
+}
+
+/* Node labels in main graph SVG */
+.graph-node-label-svg {
+  font-size: 3px;
+  fill: var(--text-muted);
+  pointer-events: none;
+  text-anchor: middle;
+  font-family: var(--font-interface);
+  user-select: none;
+}
+
 /* Gradient sections */
 .gradient-section {
   margin-bottom: 9px;
@@ -2731,6 +2823,7 @@ button.is-disabled {
     text-overflow: ellipsis;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
 }
 
@@ -2760,6 +2853,7 @@ button.is-disabled {
     text-overflow: ellipsis;
     display: -webkit-box;
     -webkit-line-clamp: 3;
+    line-clamp: 3;
     -webkit-box-orient: vertical;
 }
 
