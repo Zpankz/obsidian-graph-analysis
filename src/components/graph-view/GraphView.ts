@@ -1474,6 +1474,7 @@ export class GraphView {
     
     public updateSettings(settings: GraphAnalysisSettings): void {
         this.vaultAnalysisManager.updateSettings(settings);
+        this.reloadVaultData();
     }
     
     public recenterGraph(animate: boolean = true): void {
