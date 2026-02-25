@@ -32,7 +32,7 @@ The graph visualizes your vault as a network: **nodes** are notes, **edges** are
 - **Hover**: Adjacent connections highlight; centrality measures available in the UI
 - **Drag**: Reposition nodes; the layout updates dynamically
 
-![Graph View](docs/images/graph-view.mov)
+https://github.com/user-attachments/assets/24ab3be7-32fe-4f32-913e-f923b13fb404
 
 ## AI-Powered Vault Analysis
 
