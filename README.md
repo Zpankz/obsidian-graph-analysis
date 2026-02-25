@@ -2,7 +2,7 @@
 
 A plugin for [Obsidian](https://obsidian.md) that analyzes your vault using graph algorithms and AI to provide insights into note relationships, importance, and content.
 
-![Graph View](docs/images/graph-view.png)
+![Graph View](docs/images/graph.png)
 
 ## Features
 
@@ -32,7 +32,7 @@ The graph visualizes your vault as a network: **nodes** are notes, **edges** are
 - **Hover**: Adjacent connections highlight; centrality measures available in the UI
 - **Drag**: Reposition nodes; the layout updates dynamically
 
-![Graph View](docs/images/graph-view.png)
+![Graph View](docs/images/graph-view.mov)
 
 ## AI-Powered Vault Analysis
 
