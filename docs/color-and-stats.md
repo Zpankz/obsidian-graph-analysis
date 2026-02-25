@@ -36,12 +36,10 @@ The repository exposes `KEPLER_COLOR_PALETTES` and `colorPaletteToColorRange(...
 The example below shows the mapping logic you can reuse in `GraphView` when preparing nodes for D3 rendering.
 
 ```ts
-// filepath: /Users/wluo/Projects/cursor-projects/obsidian-graph-analysis/docs/color-and-stats.md
-// Example: map centrality scores -> color & size
-
-import ss from 'simple-statistics';
+// Example: map centrality scores -> color & size (e.g. in GraphView or similar)
+import * as ss from 'simple-statistics';
 import chroma from 'chroma-js';
-import { KEPLER_COLOR_PALETTES, colorPaletteToColorRange } from '../src/utils/color-palette';
+import { KEPLER_COLOR_PALETTES, colorPaletteToColorRange } from '../../lib/color-palette';
 // types
 type Node = { id: string; name: string; centralityScore?: number };
 

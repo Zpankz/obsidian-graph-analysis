@@ -107,9 +107,10 @@ Under Obsidian settings → **Graph Analysis**:
 
 ## Technical Details
 
-- TypeScript for the Obsidian plugin interface
-- Rust compiled to WebAssembly for graph analysis ([rustworkx](https://github.com/rustworkx/rustworkx))
-- Modular cache: tab-specific analysis files and persistent vault analysis JSON
+- **TypeScript** for the Obsidian plugin interface and UI.
+- **WebAssembly (WASM)**: Graph algorithms (degree, betweenness, closeness, eigenvector centrality, layout) run in Rust compiled to WASM via [rustworkx](https://github.com/rustworkx/rustworkx), so the plugin gets native-speed graph computation in the browser.
+- **Modular cache**: Tab-specific analysis files and persistent vault analysis JSON.
+- **Gemini Flash Lite**: The plugin uses Google’s Gemini Flash Lite for vault analysis and note summaries. Flash Lite is sufficient for structured tasks like summaries, keywords, and domain extraction, and is cost-efficient on the free tier with lower token usage than larger models.
 
 ## Build
 
@@ -124,7 +125,12 @@ npm install
 npm run build
 ```
 
-Output is in `dist/`. To install into a vault: copy the contents of `dist/` and `graph-analysis-wasm/pkg/` into your vault's `.obsidian/plugins/obsidian-graph-analysis/` (or use `npm run copy-to-vault` if you have the vault path configured).
+**Build process:** `npm run build` builds both the WASM module and the TypeScript plugin. It runs in order: 
+(1) **typecheck** — TypeScript check; 
+(2) **build-wasm** — compiles the Rust graph library to WebAssembly via `wasm-pack build --target web` in `graph-analysis-wasm/`; 
+(3) **build:ts** — bundles the plugin with esbuild (`scripts/esbuild.config.mjs`), which outputs to `dist/` and copies the built WASM file and other assets from `graph-analysis-wasm/pkg/` into `dist/`. One command produces a ready-to-use plugin in `dist/`.
+
+**Output:** Everything ends up in `dist/`. To install into a vault, copy the contents of `dist/` into your vault's `.obsidian/plugins/obsidian-graph-analysis/` (or use `npm run copy-to-vault` if you have the vault path configured).
 
 ## Contributing
 

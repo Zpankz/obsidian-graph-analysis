@@ -1,10 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { loadEnv } from './utils/load-env.mjs';
-
-// Load environment variables from .env files
-loadEnv();
 
 // Get the current directory
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -45,7 +41,7 @@ if (process.env.OBSIDIAN_VAULT_PATH) {
 if (!vaultPath || !fs.existsSync(vaultPath)) {
     console.error('Obsidian vault not found at the default location.');
     console.log('Please either:');
-    console.log('  1. Set OBSIDIAN_VAULT_PATH in a .env or .env.local file');
+    console.log('  1. Set OBSIDIAN_VAULT_PATH environment variable');
     console.log('  2. Update the default path in this script');
     process.exit(1);
 }
