@@ -2143,6 +2143,12 @@ export class GraphView {
                     break;
             }
 
+            // DEBUG: Log raw centrality scores from WASM
+            const rawScores = results.map(n => n.centrality[type]);
+            const nonNullCount = rawScores.filter(s => s !== undefined && s !== null).length;
+            const nonZeroCount = rawScores.filter(s => typeof s === 'number' && s !== 0).length;
+            // console.log(`[GraphAnalysis] Raw ${type} scores: total=${rawScores.length}, non-null=${nonNullCount}, non-zero=${nonZeroCount}, sample=`, rawScores.slice(0, 5));
+
             // Store the scores for later use - use for loop for better performance
             this.lastCentralityScores = {};
             const resultCount = results.length;
@@ -2153,8 +2159,13 @@ export class GraphView {
 
             // Find min and max scores for normalization
             const scores = Object.values(this.lastCentralityScores);
-            const minScore = Math.min(...scores);
-            const maxScore = Math.max(...scores);
+            const minScore = scores.reduce((min, v) => Math.min(min, v), Infinity);
+            const maxScore = scores.reduce((max, v) => Math.max(max, v), -Infinity);
+
+            // DEBUG: Log cleaned scores before Jenks classification
+            const uniqueScoreCount = new Set(scores).size;
+            const zeroCount = scores.filter(s => s === 0).length;
+            // console.log(`[GraphAnalysis] Cleaned ${type} scores for Jenks: count=${scores.length}, min=${minScore}, max=${maxScore}, unique=${uniqueScoreCount}, zeros=${zeroCount}`);
             
             // Get the color palette
             const palette = this.colorPalettes.find(p => p.name === this.selectedPalettes[type]);
@@ -2183,13 +2194,16 @@ export class GraphView {
                         .range(colors);
                     break;
 
-                case 'jenks':
+                case 'jenks': {
                     // Calculate Jenks natural breaks
                     const breaks = this.calculateJenksBreaks(scores, colors.length);
+                    const domain = breaks.length > 2 ? breaks.slice(1, -1) : [];
+                    const range = colors.slice(0, domain.length + 1);
                     colorScale = d3.scaleThreshold<number, string>()
-                        .domain(breaks.slice(1, -1)) // Remove first and last break points
-                        .range(colors);
+                        .domain(domain)
+                        .range(range.length > 0 ? range : [colors[0]]);
                     break;
+                }
 
                 default:
                     colorScale = d3.scaleLinear<string>()
@@ -2263,20 +2277,41 @@ export class GraphView {
     private calculateJenksBreaks(data: number[], numClasses: number): number[] {
         if (data.length === 0) return [];
         if (data.length === 1) return [data[0], data[0]];
-        if (numClasses >= data.length) return [...new Set(data)].sort((a: number, b: number) => a - b);
 
-        // Use simple-statistics for Jenks Natural Breaks calculation
-        const breaks = ss.jenks(data, numClasses);
-        
-        // Ensure we include both min and max values
-        if (!breaks.includes(Math.min(...data))) {
-            breaks.unshift(Math.min(...data));
+        const sorted = [...data].sort((a, b) => a - b);
+        const minVal = sorted[0];
+        const maxVal = sorted[sorted.length - 1];
+        const uniqueCount = new Set(sorted).size;
+
+        if (uniqueCount === 1) return [minVal, minVal];
+
+        const effectiveClasses = Math.min(Math.max(1, Math.floor(numClasses)), uniqueCount, data.length);
+
+        if (effectiveClasses >= data.length) {
+            return [...new Set(sorted)].sort((a, b) => a - b);
         }
-        if (!breaks.includes(Math.max(...data))) {
-            breaks.push(Math.max(...data));
+
+        let breaks: number[] | null = null;
+        try {
+            breaks = ss.jenks(sorted, effectiveClasses);
+        } catch (error) {
+            // console.warn('[GraphAnalysis] Jenks calculation failed, using quantile fallback:', error);
         }
-        
-        return breaks.sort((a: number, b: number) => a - b);
+
+        if (!breaks || !Array.isArray(breaks) || breaks.length < 2) {
+            // Quantile-based fallback
+            breaks = [];
+            for (let i = 0; i <= effectiveClasses; i++) {
+                const pos = (sorted.length - 1) * (i / effectiveClasses);
+                breaks.push(sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(pos)))]);
+            }
+        }
+
+        const result = [...new Set([...breaks, minVal, maxVal])]
+            .filter(v => Number.isFinite(v))
+            .sort((a, b) => a - b);
+
+        return result.length < 2 ? [minVal, maxVal] : result;
     }
 
     private updateNodeColors(results: GraphNode[], type: 'betweenness' | 'closeness' | 'eigenvector' | 'degree') {

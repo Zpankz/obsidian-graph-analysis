@@ -25,7 +25,9 @@ if (process.env.OBSIDIAN_VAULT_PATH) {
     if (isMac) {
         // macOS path - update this to your actual vault path
         const homeDir = process.env.HOME;
-        vaultPath = path.join(homeDir, 'Obsidian', 'Devs');
+        // vaultPath = path.join(homeDir, 'Obsidian', 'Devs');
+        vaultPath = path.join(homeDir, 'Obsidian', 'ObsidianSync');
+        
     } else if (isWindows) {
         // Windows path
         const appData = process.env.APPDATA;

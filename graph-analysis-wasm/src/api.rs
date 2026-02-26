@@ -5,6 +5,12 @@ use crate::models::*;
 use crate::graph_manager::{GRAPH_MANAGER, check_graph_initialized, initialize_from_vault, clear};
 use crate::utils;
 
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    fn warn(s: &str);
+}
+
 // Helper function to sort and format results
 fn format_results(mut results: Vec<Node>, is_sorting: bool, centrality_type: Option<&str>) -> String {
     if is_sorting {
@@ -256,13 +262,31 @@ pub fn calculate_eigenvector_centrality_cached() -> String {
     let mut results = Vec::new();
     
     // Calculate eigenvector centrality using rustworkx-core
-    // Use unit weights (1.0) for all edges, max_iter=100, tol=1e-6
+    // Use unit weights (1.0) for all edges.
+    // Scale max_iter with graph size to handle large vaults (1k-10k+ nodes).
+    // Relaxed tolerance (1e-4) still gives accurate relative rankings while
+    // converging much more reliably on large/dense graphs.
+    let node_count = manager.node_names.len();
+    let max_iter = 1000_usize.max(node_count * 3);
+    let tol = 1e-4_f64;
     let centrality_result = eigenvector_centrality(
         &manager.graph,
         |_| Ok::<f64, String>(1.0),
-        Some(100),
-        Some(1e-6)
+        Some(max_iter),
+        Some(tol)
     );
+
+    match &centrality_result {
+        Ok(None) => warn(&format!(
+            "[graph-analysis] Eigenvector centrality did not converge within {} iterations (tol={}) for {} nodes. All scores will be None.",
+            max_iter, tol, node_count
+        )),
+        Err(e) => warn(&format!(
+            "[graph-analysis] Eigenvector centrality computation error: {:?}",
+            e
+        )),
+        Ok(Some(_)) => {}
+    }
 
     // Create nodes with eigenvector centrality scores
     for (idx, node_name) in manager.node_names.iter().enumerate() {

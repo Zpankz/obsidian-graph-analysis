@@ -623,7 +623,7 @@ export class VaultSemanticAnalysisManager {
             
             // Log batch distribution for transparency
             const updateType = isIncrementalUpdate ? 'incremental' : 'full';
-            console.log(`Processing ${filesToProcess.length} files (${updateType} update) in ${totalBatches} note-based batches (max ${this.MAX_NOTES_PER_BATCH} notes per batch) using ${this.aiService.getModelName()}`);
+            console.log(`Processing ${filesToProcess.length} files (${updateType} update) in ${totalBatches} note-based batches (max ${this.MAX_NOTES_PER_BATCH} notes per batch) using ${this.aiService.getSemanticModelName()}`);
             if (isIncrementalUpdate) {
                 console.log(`Incremental update: ${changedCount} changed, ${newCount} new, ${unchangedCount} unchanged files`);
             }
@@ -1328,7 +1328,7 @@ For each note, provide:
             console.log(`Structured analysis: ${meaningfulFiles.length} notes, prompt length: ${fullPrompt.length} chars`);
             console.log('Response schema:', JSON.stringify(responseSchema, null, 2));
             
-            const response = await this.aiService.generateStructuredAnalysis<Array<{
+            const response = await this.aiService.generateSemanticAnalysis<Array<{
                 summary: string;
                 keywords: string;
                 knowledgeDomain: string;

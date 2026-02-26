@@ -146,8 +146,8 @@ For the note, provide:
             // Build the complete prompt
             const fullPrompt = `${systemPrompt}\n\n${contextPrompt}\n\n${instructionPrompt}\n\n--- Note: "${fileName}" (${cleanedContent.split(/\s+/).length} words) ---\n${cleanedContent}`;
 
-            // Use structured analysis for reliable results
-            const response = await this.aiService.generateStructuredAnalysis<{
+            // Use semantic analysis model (Gemma 3 27B) for reliable results
+            const response = await this.aiService.generateSemanticAnalysis<{
                 keyWords: string;
                 keyPoints: string;
             }>(
@@ -170,7 +170,7 @@ For the note, provide:
             const displayFormat = `${summaryText}
 
 *Original word count: ${wordCount} words*
-*Generated using Google ${this.aiService.getModelName()}*`;
+*Generated using Google ${this.aiService.getSemanticModelName()}*`;
 
             // Format for writing to note (callout format without word count)
             const writeFormat = `> [!summary] AI Summary
