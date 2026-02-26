@@ -127,9 +127,9 @@ npm run build
 ```
 
 **Build process:** `npm run build` builds both the WASM module and the TypeScript plugin. It runs in order: 
-(1) **typecheck** — TypeScript check; 
-(2) **build-wasm** — compiles the Rust graph library to WebAssembly via `wasm-pack build --target web` in `graph-analysis-wasm/`; 
-(3) **build:ts** — bundles the plugin with esbuild (`scripts/esbuild.config.mjs`), which outputs to `dist/` and copies the built WASM file and other assets from `graph-analysis-wasm/pkg/` into `dist/`. One command produces a ready-to-use plugin in `dist/`.
+1. **typecheck** — TypeScript check; 
+2. **build-wasm** — compiles the Rust graph library to WebAssembly via `wasm-pack build --target web` in `graph-analysis-wasm/`; 
+3. **build:ts** — bundles the plugin with esbuild (`scripts/esbuild.config.mjs`), which outputs to `dist/` and copies the built WASM file and other assets from `graph-analysis-wasm/pkg/` into `dist/`. One command produces a ready-to-use plugin in `dist/`.
 
 **Output:** Everything ends up in `dist/`. To install into a vault, copy the contents of `dist/` into your vault's `.obsidian/plugins/obsidian-graph-analysis/` (or use `npm run copy-to-vault` if you have the vault path configured).
 
