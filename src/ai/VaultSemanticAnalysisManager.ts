@@ -21,9 +21,9 @@ export class VaultSemanticAnalysisManager {
     private subdivisionsList: Array<{id: string, name: string, domain: string, domainId: string}> = [];
     private domainTemplateLoaded: boolean = false;
     private readonly MAX_CHARS_PER_NOTE = 8000;
-    private readonly MAX_NOTES_PER_BATCH = 30;
-    private readonly DELAY_BETWEEN_BATCHES = 3000; // 3 seconds between batches for 30 RPM rate limiting
-    private readonly RATE_LIMIT_RETRY_DELAY = 8100; // 8 second delay for rate limit retry
+    private readonly MAX_NOTES_PER_BATCH = 10;
+    private readonly DELAY_BETWEEN_BATCHES = 4000; // 4s between batches (~15 req/min, within Gemma 3 27B RPM=30)
+    private readonly RATE_LIMIT_RETRY_DELAY = 15000; // 15s retry delay to respect Gemma 3 27B TPM=15K limit
 
     /**
      * Get the path to vault-analysis.json in the responses folder
@@ -596,7 +596,7 @@ export class VaultSemanticAnalysisManager {
                 }
             }
 
-            // Create optimized note-based batches (50 notes per batch, max 1000 words per note)
+            // Create note-based batches (10 notes per batch for Gemma 3 27B: RPM=30, TPM=15K, RPD=14.4K)
             const delayBetweenBatches = this.DELAY_BETWEEN_BATCHES;
             
             const batches: Array<typeof fileDataList> = [];
@@ -689,8 +689,8 @@ export class VaultSemanticAnalysisManager {
                             : `Retrying batch ${batchIndex + 1}/${totalBatches}... (${processed}/${filesToProcess.length} completed, ${failed} failed)`;
                         progressNotice.setMessage(retryProgressText);
                         
-                        // Wait longer for rate limit retry (respecting 30 RPM = max 2 requests per minute)
-                        await new Promise(resolve => setTimeout(resolve, this.RATE_LIMIT_RETRY_DELAY)); // 8 second delay for rate limit retry
+                        // Wait longer for rate limit retry (respecting Gemma 3 27B TPM=15K)
+                        await new Promise(resolve => setTimeout(resolve, this.RATE_LIMIT_RETRY_DELAY));
                         
                         // Retry the batch once
                         try {

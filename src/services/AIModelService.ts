@@ -23,7 +23,6 @@ export interface AIResponse<T = string> {
 export class AIModelService {
     private settings: GraphAnalysisSettings;
     private readonly RATE_LIMIT_DELAY = 2500; // 2.5 seconds between requests for 30 RPM
-    private readonly SEMANTIC_RATE_LIMIT_DELAY = 5000; // 5 seconds between requests for Gemma 3 27B (lower RPM)
     private readonly MAX_RETRIES = 3;
     private readonly MODEL_NAME = 'gemini-flash-lite-latest';
     private readonly SEMANTIC_MODEL_NAME = 'gemma-3-27b-it';
@@ -237,9 +236,8 @@ export class AIModelService {
 
             const errorMessage = (error as Error).message;
             if (errorMessage.includes('429') || errorMessage.includes('Rate limit')) {
-                const waitTime = Math.max(this.SEMANTIC_RATE_LIMIT_DELAY, 10000);
-                console.log(`Semantic analysis rate limited (${this.SEMANTIC_MODEL_NAME}). Retrying in ${waitTime/1000} seconds...`);
-                await new Promise(resolve => setTimeout(resolve, waitTime));
+                console.log(`Semantic analysis rate limited (${this.SEMANTIC_MODEL_NAME}). Retrying in 10 seconds...`);
+                await new Promise(resolve => setTimeout(resolve, 10000));
                 return this.generateSemanticAnalysis(prompt, responseSchema, maxOutputTokens, temperature, topP);
             }
 
@@ -361,10 +359,6 @@ export class AIModelService {
      */
     public async waitForRateLimit(): Promise<void> {
         await new Promise(resolve => setTimeout(resolve, this.RATE_LIMIT_DELAY));
-    }
-
-    public async waitForSemanticRateLimit(): Promise<void> {
-        await new Promise(resolve => setTimeout(resolve, this.SEMANTIC_RATE_LIMIT_DELAY));
     }
 
     /**
