@@ -54,7 +54,7 @@ The foundation of vault analysis. Each note gets:
 - **Paginated Results**: Click note titles to open; each result shows summary, keywords, domains, and metadata
 - **Incremental Updates**: Only re-analyzes changed or new notes
 
-![Semantic Analysis](docs/images/semantic-analysis.png)
+![Semantic Analysis](docs/images/semantic-analysis.gif)
 
 ### Tab 2: Knowledge Structure
 
