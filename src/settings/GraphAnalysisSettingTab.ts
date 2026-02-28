@@ -49,6 +49,7 @@ export class GraphAnalysisSettingTab extends PluginSettingTab {
         containerEl.createEl('h3', { text: 'LLM Model Configuration', cls: 'graph-settings-section-title' });
         const apiContainer = containerEl.createDiv({ cls: 'graph-settings-section-container' });
 
+        let apiKeyTextComponent: { inputEl: HTMLInputElement };
         new Setting(apiContainer)
             .setName('Gemini API Key')
             .setDesc(createFragment((frag: DocumentFragment) => {
@@ -67,9 +68,21 @@ export class GraphAnalysisSettingTab extends PluginSettingTab {
                         this.plugin.settings.geminiApiKey = value;
                         await this.plugin.saveSettings();
                     });
-                // Make it a password field for security
                 text.inputEl.type = 'password';
+                apiKeyTextComponent = text;
                 return text;
+            })
+            .addExtraButton(btn => {
+                btn.setIcon('eye')
+                    .setTooltip('Show API key')
+                    .onClick(() => {
+                        const input = apiKeyTextComponent.inputEl;
+                        const isVisible = input.type === 'text';
+                        input.type = isVisible ? 'password' : 'text';
+                        btn.setIcon(isVisible ? 'eye' : 'eye-off');
+                        btn.setTooltip(isVisible ? 'Show API key' : 'Hide API key');
+                    });
+                return btn;
             });
     }
 

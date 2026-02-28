@@ -122,7 +122,6 @@ export class GraphView {
     // New tooltip timeout
     private _hideTooltipTimeout: number | null = null;
 
-
     // Control panel elements
     private controlPanel!: HTMLElement;
 
@@ -648,7 +647,6 @@ export class GraphView {
     }
     
     private removeNodeTooltip() {
-        // Remove any existing tooltip using our cached reference
         if (this.currentTooltip) {
             this.currentTooltip.remove();
             this.currentTooltip = null;
@@ -727,11 +725,6 @@ export class GraphView {
                 // Show frontmatter if available
                 if (metadata && metadata.frontmatter) {
                     const frontmatterField = metadataContainer.createDiv({ cls: 'metadata-section' });
-                    const frontmatterTitle = frontmatterField.createEl('div', { 
-                        text: 'Frontmatter', 
-                        cls: 'metadata-section-title' 
-                    });
-                    
                     const frontmatterContent = frontmatterField.createDiv({ cls: 'frontmatter-content' });
                     
                     // Filter out sensitive or system properties
@@ -798,29 +791,13 @@ export class GraphView {
                 // Create preview content container
                 const previewContent = previewSection.createDiv({ cls: 'preview-content' });
                 
-                // Load and format note content
+                // Load and display raw note content (condensed, one blank line before each heading)
                 this.app.vault.read(file).then(content => {
-                    let previewText = content.slice(0, 500) + (content.length > 500 ? '...' : '');
-                    
-                    // Format headings
-                    previewText = previewText.replace(/^(#{1,6})\s+(.+?)$/gm, (_, hashes, text) => {
-                        const lineEnd = '\n';
-                        const headingLevel = hashes.length;
-                        return `<span style="font-weight: bold; font-size: ${1.2 - (headingLevel * 0.1)}em;">${text}</span>${lineEnd}`;
-                    });
-                    
-                    // Format bold text
-                    previewText = previewText.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-                    
-                    // Format italic text
-                    previewText = previewText.replace(/\*(.+?)\*/g, '<em>$1</em>');
-                    
-                    // Format links
-                    previewText = previewText.replace(/\[(.+?)\]\((.+?)\)/g, '<a href="#" style="color: var(--text-accent);">$1</a>');
-                    
-                    // Set HTML content with basic formatting
-                    previewContent.innerHTML = previewText;
-                }).catch(err => {
+                    if (this.currentTooltip !== tooltip) return;
+                    const previewText = this.formatNotePreview(content);
+                    previewContent.setText(previewText);
+                }).catch(() => {
+                    if (this.currentTooltip !== tooltip) return;
                     previewContent.setText('Unable to load note preview.');
                     previewContent.classList.add('metadata-error-text');
                 });
@@ -844,6 +821,16 @@ export class GraphView {
         // Position tooltip at mouse location
         const containerRect = this.container.getBoundingClientRect();
         this.positionTooltip(tooltip, event.clientX - containerRect.left, event.clientY - containerRect.top, containerRect);
+    }
+
+    /** Raw content: strip frontmatter, condense empty lines, keep one blank line before each heading, truncate to 900 chars. */
+    private formatNotePreview(content: string): string {
+        const withoutFrontmatter = content.replace(/^---[\s\S]*?---\n/m, '');
+        const condensed = withoutFrontmatter.replace(/\n{2,}/g, '\n').trim();
+        const withHeadingSpacing = condensed
+            .replace(/([^\n])\n(#{1,6}\s)/g, '$1\n\n$2')
+            .replace(/^\n(#{1,6}\s)/, '\n\n$1');
+        return withHeadingSpacing.slice(0, 900) + (withHeadingSpacing.length > 900 ? '...' : '');
     }
 
     private getTooltipSetting(settingName: string): number {

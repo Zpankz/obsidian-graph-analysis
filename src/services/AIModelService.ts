@@ -18,18 +18,28 @@ export interface AIResponse<T = string> {
     tokenUsage: TokenUsage;
 }
 
+export type SemanticErrorType = 'rate_limit' | 'quota_exhausted' | 'json_parse' | 'other';
+
+export class SemanticAnalysisError extends Error {
+    constructor(
+        message: string,
+        public readonly errorType: SemanticErrorType,
+        public readonly model: string
+    ) {
+        super(message);
+        this.name = 'SemanticAnalysisError';
+    }
+}
+
 /** Semantic models for vault analysis and AI summary (dual-model for 40 RPD on free tier) */
-export const SEMANTIC_MODELS = ['gemini-2.5-flash-lite', 'gemini-flash-lite-latest'] as const;
+export const SEMANTIC_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash'] as const;
 
 export class AIModelService {
     private settings: GraphAnalysisSettings;
-    private readonly MAX_RETRIES = 3;
     // Gemini 3 Flash: RPM 5 -> 12s between requests
     private readonly ADVANCED_RATE_LIMIT_DELAY = 12000;
-    // Gemini 2.5 Flash Lite (gemini-flash-lite-latest): RPM 10 -> 6s between requests
-    private readonly SEMANTIC_RATE_LIMIT_DELAY = 6000;
     private readonly MODEL_NAME = 'gemini-2.5-flash';
-    private readonly SEMANTIC_MODEL_NAME = SEMANTIC_MODELS[0]; // Default when no modelOverride
+    private readonly SEMANTIC_MODEL_NAME = SEMANTIC_MODELS[1]; // Default when no modelOverride
     
     public getModelName(): string {
         return this.MODEL_NAME;
@@ -38,6 +48,16 @@ export class AIModelService {
     public getSemanticModelName(): string {
         return this.SEMANTIC_MODEL_NAME;
     }
+
+    private static classifySemanticError(message: string): SemanticErrorType {
+        const lower = message.toLowerCase();
+        const is429 = message.includes('429') || lower.includes('rate limit');
+        const isQuota = lower.includes('per day') || lower.includes('rpd') || lower.includes('daily') || lower.includes('quota');
+        if (is429 && isQuota) return 'quota_exhausted';
+        if (is429) return 'rate_limit';
+        return 'other';
+    }
+
     private genAI: GoogleGenAI | null = null;
 
     constructor(settings: GraphAnalysisSettings) {
@@ -218,9 +238,10 @@ export class AIModelService {
             try {
                 parsedResult = JSON.parse(result) as T;
             } catch (parseError) {
+                const msg = `Failed to parse semantic response: ${(parseError as Error).message}`;
                 console.error('Failed to parse semantic response as JSON:', parseError);
                 console.error('Raw response text:', result.substring(0, 500));
-                throw new Error(`Failed to parse semantic response: ${(parseError as Error).message}`);
+                throw new SemanticAnalysisError(msg, 'json_parse', model);
             }
 
             console.log(`SEMANTIC RESPONSE SUCCESS (${result.length} chars, tokens: ${tokenUsage.totalTokens})`);
@@ -232,22 +253,12 @@ export class AIModelService {
             };
 
         } catch (error) {
+            if (error instanceof SemanticAnalysisError) throw error;
+
             console.error(`${model} semantic API error:`, error);
-
             const errorMessage = (error as Error).message;
-            if (errorMessage.includes('429') || errorMessage.includes('Rate limit')) {
-                console.log(`Semantic analysis rate limited (${model}). Retrying in ${this.SEMANTIC_RATE_LIMIT_DELAY/1000} seconds...`);
-                await new Promise(resolve => setTimeout(resolve, this.SEMANTIC_RATE_LIMIT_DELAY));
-                return this.generateSemanticAnalysis(prompt, responseSchema, maxOutputTokens, temperature, topP, modelOverride);
-            }
-
-            console.error('Semantic analysis error context:', {
-                promptLength: prompt.length,
-                maxOutputTokens,
-                hasSchema: !!responseSchema
-            });
-
-            throw error;
+            const errorType = AIModelService.classifySemanticError(errorMessage);
+            throw new SemanticAnalysisError(errorMessage, errorType, model);
         }
     }
 

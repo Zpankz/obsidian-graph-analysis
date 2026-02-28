@@ -6,7 +6,7 @@ import {
     VaultAnalysisData,
     MasterAnalysisManager
 } from './MasterAnalysisManager';
-import { AIModelService, SEMANTIC_MODELS } from '../services/AIModelService';
+import { AIModelService, SEMANTIC_MODELS, SemanticAnalysisError } from '../services/AIModelService';
 import { GraphDataBuilder } from '../components/graph-view/data/graph-builder';
 import { PluginService } from '../services/PluginService';
 import { KnowledgeDomainHelper } from './KnowledgeDomainHelper';
@@ -24,7 +24,6 @@ export class VaultSemanticAnalysisManager {
     private readonly MAX_CHARS_PER_NOTE = 8000;
     private readonly MAX_NOTES_PER_BATCH = 30;
     private readonly DELAY_BETWEEN_BATCHES = 6000; // 6s between batches (Gemini 2.5 Flash Lite RPM 10)
-    private readonly RATE_LIMIT_RETRY_DELAY = 12000; // 12s retry delay on rate limit
 
     /**
      * Get the path to vault-analysis.json in the responses folder
@@ -524,21 +523,31 @@ export class VaultSemanticAnalysisManager {
                 changedCount = changeInfo.changedFiles.length;
                 newCount = changeInfo.newFiles.length;
                 unchangedCount = changeInfo.unchangedResults.length;
-                
+
                 // Populate Set of new file paths for quick lookup during batch processing
                 changeInfo.newFiles.forEach(file => newFilePaths.add(file.path));
-
-                // If no files need processing, show message and return
-                if (filesToProcess.length === 0) {
-                    new Notice(`✅ All files are up to date. No changes detected. (${unchangedCount} files unchanged)`);
-                    return false;
-                }
             } else {
                 // Full update: process all files
-                filesToProcess = includedFiles;
+                filesToProcess = [...includedFiles];
                 unchangedCount = 0;
-                // All files are new in a full update
                 filesToProcess.forEach(file => newFilePaths.add(file.path));
+            }
+
+            // Append failed-batch files at the end (for resume)
+            const failedPaths = await this.getFailedBatchFilePaths();
+            const inFilesToProcess = new Set(filesToProcess.map(f => f.path));
+            for (const path of failedPaths) {
+                if (inFilesToProcess.has(path)) continue;
+                const file = this.app.vault.getAbstractFileByPath(path);
+                if (file instanceof TFile && !this.isFileExcluded(file)) {
+                    filesToProcess.push(file);
+                    inFilesToProcess.add(path);
+                }
+            }
+
+            if (filesToProcess.length === 0) {
+                new Notice(`✅ All files are up to date. No changes detected. (${unchangedCount} files unchanged)`);
+                return false;
             }
 
             // Show initial notice with incremental update info
@@ -648,35 +657,84 @@ export class VaultSemanticAnalysisManager {
             
             // Aggregate token usage across all batches
             let totalTokenUsage = { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 };
+            let stoppedDueToQuota = false;
+            let firstBatchTimestamp: string | null = null;
 
             // Process batches sequentially with proper rate limiting
-            for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+            for (let batchIndex = 0; batchIndex < totalBatches && !stoppedDueToQuota; batchIndex++) {
                 const batch = batches[batchIndex];
                 const batchFileCount = batch.length;
                 const batchCharCount = batch.reduce((sum, f) => sum + f.charCount, 0);
-                
+                const primaryModel = this.getSemanticModelForBatch(batchIndex);
+                const alternateModel = SEMANTIC_MODELS[(batchIndex + 1) % 2];
+
                 // Update progress with batch info
                 const totalToProcess = filesToProcess.length;
-                const progressText = isIncrementalUpdate 
+                const progressText = isIncrementalUpdate
                     ? `Processing batch ${batchIndex + 1}/${totalBatches} (${batchFileCount} notes, ${batchCharCount} chars)... (${processed}/${totalToProcess} completed, ${failed} failed, ${unchangedCount} unchanged)`
                     : `Processing batch ${batchIndex + 1}/${totalBatches} (${batchFileCount} notes, ${batchCharCount} chars)... (${processed}/${totalToProcess} completed, ${failed} failed)`;
                 progressNotice.setMessage(progressText);
-                
+
+                let batchResult: { results: Array<{ success: boolean; data?: VaultAnalysisResult; error?: string }>; tokenUsage: { promptTokens: number; candidatesTokens: number; totalTokens: number } } | null = null;
+
                 try {
-                    // Process entire batch in a single API request (alternate model per batch)
-                    const batchResult = await this.analyzeBatch(batch, batchIndex);
-                    const batchResults = batchResult.results;
+                    batchResult = await this.analyzeBatch(batch, batchIndex);
+                } catch (batchError) {
+                    const err = batchError instanceof SemanticAnalysisError ? batchError : new SemanticAnalysisError((batchError as Error).message, 'other', primaryModel);
+                    console.error(`Error processing batch ${batchIndex + 1}:`, batchError);
+
+                    if (err.errorType === 'quota_exhausted') {
+                        await this.appendFailedBatch(batch, batchIndex, primaryModel, alternateModel, err.message);
+                        failed += batch.length;
+                        processed += batch.length;
+                        progressNotice.hide();
+                        stoppedDueToQuota = true;
+                        break;
+                    }
+
+                    progressNotice.setMessage(`Retrying batch ${batchIndex + 1}/${totalBatches} with ${alternateModel}...`);
+                    await new Promise(resolve => setTimeout(resolve, 10000));
+                    try {
+                        batchResult = await this.analyzeBatch(batch, batchIndex, alternateModel);
+                    } catch (retryError) {
+                        const retryErr = retryError instanceof SemanticAnalysisError ? retryError : new SemanticAnalysisError((retryError as Error).message, 'other', alternateModel);
+                        console.error(`Retry failed for batch ${batchIndex + 1}:`, retryError);
+
+                        if (retryErr.errorType === 'quota_exhausted') {
+                            await this.appendFailedBatch(batch, batchIndex, primaryModel, alternateModel, retryErr.message);
+                            failed += batch.length;
+                            processed += batch.length;
+                            progressNotice.hide();
+                            stoppedDueToQuota = true;
+                            break;
+                        }
+
+                        if (retryErr.errorType === 'rate_limit') {
+                            progressNotice.setMessage(`Rate limited, waiting 15s before retry...`);
+                            await new Promise(resolve => setTimeout(resolve, 15000));
+                            try {
+                                batchResult = await this.analyzeBatch(batch, batchIndex);
+                            } catch (thirdError) {
+                                await this.appendFailedBatch(batch, batchIndex, primaryModel, alternateModel, (thirdError as Error).message);
+                                failed += batch.length;
+                                processed += batch.length;
+                            }
+                        } else {
+                            await this.appendFailedBatch(batch, batchIndex, primaryModel, alternateModel, retryErr.message);
+                            failed += batch.length;
+                            processed += batch.length;
+                        }
+                    }
+                }
+
+                if (batchResult) {
                     totalTokenUsage.promptTokens += batchResult.tokenUsage.promptTokens;
                     totalTokenUsage.candidatesTokens += batchResult.tokenUsage.candidatesTokens;
                     totalTokenUsage.totalTokens += batchResult.tokenUsage.totalTokens;
-                    
                     console.log(`Batch ${batchIndex + 1} completed successfully: ${batchFileCount} notes, ${batchCharCount} chars`);
-                    
-                    // Process batch results
                     for (let i = 0; i < batch.length; i++) {
                         const fileData = batch[i];
-                        const result = batchResults[i];
-                        
+                        const result = batchResult!.results[i];
                         if (result && result.success && result.data) {
                             results.push(result.data);
                             processed++;
@@ -686,44 +744,26 @@ export class VaultSemanticAnalysisManager {
                             processed++;
                         }
                     }
-                    
-                } catch (batchError) {
-                    console.error(`Error processing batch ${batchIndex + 1}:`, batchError);
-                    const primaryModel = this.getSemanticModelForBatch(batchIndex);
-                    const retryModel = SEMANTIC_MODELS[(batchIndex + 1) % 2];
-                    const retryProgressText = isIncrementalUpdate
-                        ? `Retrying batch ${batchIndex + 1}/${totalBatches} with ${retryModel}... (${processed}/${filesToProcess.length} completed, ${failed} failed, ${unchangedCount} unchanged)`
-                        : `Retrying batch ${batchIndex + 1}/${totalBatches} with ${retryModel}... (${processed}/${filesToProcess.length} completed, ${failed} failed)`;
-                    progressNotice.setMessage(retryProgressText);
-                    await new Promise(resolve => setTimeout(resolve, this.RATE_LIMIT_RETRY_DELAY));
-                    try {
-                        console.log(`Retrying batch ${batchIndex + 1} with ${retryModel}...`);
-                        const retryResult = await this.analyzeBatch(batch, batchIndex, retryModel);
-                        const retryResults = retryResult.results;
-                        totalTokenUsage.promptTokens += retryResult.tokenUsage.promptTokens;
-                        totalTokenUsage.candidatesTokens += retryResult.tokenUsage.candidatesTokens;
-                        totalTokenUsage.totalTokens += retryResult.tokenUsage.totalTokens;
-                        console.log(`Batch ${batchIndex + 1} retry completed successfully`);
-                        for (let i = 0; i < batch.length; i++) {
-                            const fileData = batch[i];
-                            const result = retryResults[i];
-                            if (result && result.success && result.data) {
-                                results.push(result.data);
-                                processed++;
-                            } else {
-                                console.error(`Failed to analyze file ${fileData.file.path} on retry:`, result?.error || 'Unknown error');
-                                failed++;
-                                processed++;
-                            }
+
+                    // Persist after each successful batch
+                    const mergedSoFar = this.mergeAnalysisResults(unchangedResults, results, deletedFilePaths);
+                    if (firstBatchTimestamp === null) firstBatchTimestamp = new Date().toISOString();
+                    const batchMetadata = isIncrementalUpdate && existingAnalysis
+                        ? {
+                            generatedAt: existingAnalysis.generatedAt,
+                            totalFiles: mergedSoFar.length,
+                            generatedFiles: existingAnalysis.generatedFiles ?? existingAnalysis.totalFiles,
+                            updatedFiles: (existingAnalysis.updatedFiles ?? 0) + results.length
                         }
-                    } catch (retryError) {
-                        console.error(`Retry failed for batch ${batchIndex + 1}:`, retryError);
-                        await this.appendFailedBatch(batch, batchIndex, primaryModel, retryModel, (retryError as Error).message);
-                        failed += batch.length;
-                        processed += batch.length;
-                    }
+                        : {
+                            generatedAt: firstBatchTimestamp,
+                            totalFiles: mergedSoFar.length,
+                            generatedFiles: results.length,
+                            updatedFiles: 0
+                        };
+                    await this.saveBatchResults(mergedSoFar, isIncrementalUpdate, totalTokenUsage, batchMetadata);
                 }
-                
+
                 // Wait between batches (rate limiting handled internally)
                 if (batchIndex < totalBatches - 1) {
                     const preparingNextBatchText = isIncrementalUpdate
@@ -771,20 +811,26 @@ export class VaultSemanticAnalysisManager {
             
             // Save enhanced results to JSON file
             await this.saveAnalysisResults(
-                resultsWithRankings, 
+                resultsWithRankings,
                 isIncrementalUpdate,
                 newCount,
                 changedCount,
                 totalTokenUsage
             );
-            
+
+            if (!stoppedDueToQuota && failed === 0) {
+                await this.clearFailedBatches();
+            }
+
             enhanceNotice.hide();
             
             // Show completion notice with detailed stats
             const successCount = processed - failed;
             let completionMessage: string;
-            
-            if (isIncrementalUpdate) {
+
+            if (stoppedDueToQuota) {
+                completionMessage = `Saved partial results (${successCount} files). Free-tier daily limit reached. Retry tomorrow.`;
+            } else if (isIncrementalUpdate) {
                 if (failed === 0) {
                     completionMessage = `✅ Analysis updated successfully! Processed ${successCount} changed/new files (${changedCount} changed, ${newCount} new), kept ${unchangedCount} unchanged, removed ${deletedFilePaths.length} deleted.`;
                 } else {
@@ -797,7 +843,7 @@ export class VaultSemanticAnalysisManager {
                     completionMessage = `⚠️ Vault analysis with graph metrics completed with some issues. Processed ${successCount} files successfully, ${failed} failed. Results saved to plugin data folder`;
                 }
             }
-            
+
             new Notice(completionMessage);
             
             // Return true to indicate analysis completed successfully
@@ -888,10 +934,7 @@ export class VaultSemanticAnalysisManager {
                     }
                 } catch (apiError) {
                     console.error('Error in API batch analysis:', apiError);
-                    // Return error for all API files
-                    apiFiles.forEach(() => {
-                        results.push({ success: false, error: (apiError as Error).message });
-                    });
+                    throw apiError;
                 }
             }
             
@@ -929,6 +972,28 @@ export class VaultSemanticAnalysisManager {
         // Generate a consistent ID based on file path
         // Obsidian doesn't provide a built-in unique ID, so we create one
         return file.path.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+    }
+
+    private async getFailedBatchFilePaths(): Promise<string[]> {
+        try {
+            const content = await this.app.vault.adapter.read(this.getFailedBatchesFilePath());
+            const data = JSON.parse(content) as { failedBatches: Array<{ notes: Array<{ path: string }> }> };
+            const paths = new Set<string>();
+            for (const fb of data.failedBatches ?? []) {
+                for (const note of fb.notes ?? []) {
+                    if (note.path) paths.add(note.path);
+                }
+            }
+            return [...paths];
+        } catch {
+            return [];
+        }
+    }
+
+    private async clearFailedBatches(): Promise<void> {
+        await this.ensureResponsesDirectory();
+        await this.app.vault.adapter.write(this.getFailedBatchesFilePath(), JSON.stringify({ failedBatches: [] }, null, 2));
+        console.log('Cleared vault-analysis-failed-batches.json');
     }
 
     private async appendFailedBatch(
@@ -1110,145 +1175,141 @@ export class VaultSemanticAnalysisManager {
         // No cleanup needed - removed unused statusBarItem
     }
 
+    /**
+     * Build enhanced results (domain code-to-name conversion) and output data for vault-analysis.json.
+     * Shared by saveBatchResults and saveAnalysisResults.
+     */
+    private async buildEnhancedResultsAndOutputData(
+        results: VaultAnalysisResult[],
+        isIncrementalUpdate: boolean,
+        metadata: {
+            generatedAt: string;
+            totalFiles: number;
+            generatedFiles: number;
+            updatedFiles: number;
+            tokenUsage?: { promptTokens: number; candidatesTokens: number; totalTokens: number };
+        }
+    ): Promise<{ enhancedResults: VaultAnalysisResult[]; outputData: VaultAnalysisData }> {
+        const sortedResults = [...results].sort((a, b) => a.title.localeCompare(b.title));
+        const domainHelper = KnowledgeDomainHelper.getInstance(this.app);
+        await domainHelper.loadDomainTemplate();
+        const ddcCodeToNameMap = domainHelper.getDomainCodeToNameMap();
+
+        const enhancedResults = sortedResults.map(result => {
+            let domainCodes: string[] = [];
+            const oldResult = result as any;
+            if (oldResult.knowledgeDomain && typeof oldResult.knowledgeDomain === 'string') {
+                domainCodes = oldResult.knowledgeDomain.split(',')
+                    .map((code: string) => code.trim())
+                    .filter((code: string) => code.length > 0);
+            } else if (result.knowledgeDomains && Array.isArray(result.knowledgeDomains)) {
+                domainCodes = result.knowledgeDomains;
+            }
+            const domainNames = domainCodes.map(code => ddcCodeToNameMap.get(code) || code);
+            const cleanResult: VaultAnalysisResult = {
+                id: result.id,
+                title: result.title,
+                summary: result.summary,
+                keywords: result.keywords,
+                knowledgeDomains: domainNames,
+                created: result.created,
+                modified: result.modified,
+                path: result.path,
+                charCount: result.charCount ?? (result as { wordCount?: number }).wordCount ?? 0
+            };
+            if (result.graphMetrics) cleanResult.graphMetrics = result.graphMetrics;
+            if (result.centralityRankings) cleanResult.centralityRankings = result.centralityRankings;
+            return cleanResult;
+        });
+
+        const outputData: VaultAnalysisData = {
+            generatedAt: metadata.generatedAt,
+            ...(isIncrementalUpdate && { updatedAt: new Date().toISOString() }),
+            totalFiles: metadata.totalFiles,
+            generatedFiles: metadata.generatedFiles,
+            updatedFiles: metadata.updatedFiles,
+            apiProvider: 'Google Gemini',
+            ...(metadata.tokenUsage && { tokenUsage: metadata.tokenUsage }),
+            results: enhancedResults
+        };
+        return { enhancedResults, outputData };
+    }
+
+    /**
+     * Save batch results to disk (no graph metrics). Called after each successful batch.
+     */
+    private async saveBatchResults(
+        mergedResults: VaultAnalysisResult[],
+        isIncrementalUpdate: boolean,
+        totalTokenUsage: { promptTokens: number; candidatesTokens: number; totalTokens: number },
+        metadata: { generatedAt: string; totalFiles: number; generatedFiles: number; updatedFiles: number }
+    ): Promise<void> {
+        await this.ensureVaultAnalysisFileExists();
+        const { outputData } = await this.buildEnhancedResultsAndOutputData(mergedResults, isIncrementalUpdate, {
+            ...metadata,
+            tokenUsage: totalTokenUsage
+        });
+        await this.ensureResponsesDirectory();
+        await this.app.vault.adapter.write(this.getVaultAnalysisFilePath(), JSON.stringify(outputData, null, 2));
+        console.log(`Batch results saved (${mergedResults.length} total)`);
+    }
+
     private async saveAnalysisResults(
-        results: VaultAnalysisResult[], 
+        results: VaultAnalysisResult[],
         isIncrementalUpdate: boolean,
         newCount: number,
         changedCount: number,
         batchTokenUsage?: { promptTokens: number; candidatesTokens: number; totalTokens: number }
     ): Promise<void> {
         try {
-            // Ensure the file exists
             await this.ensureVaultAnalysisFileExists();
-            
-            // Load existing data if it exists (for migration and cumulative tracking)
+
             let existingData: VaultAnalysisData | null = null;
             try {
-                const filePath = this.getVaultAnalysisFilePath();
-                const content = await this.app.vault.adapter.read(filePath);
+                const content = await this.app.vault.adapter.read(this.getVaultAnalysisFilePath());
                 existingData = JSON.parse(content);
             } catch {
-                // File doesn't exist or invalid - will create new
                 existingData = null;
             }
-            
-            // Sort results by title for consistent ordering
-            const sortedResults = results.sort((a, b) => a.title.localeCompare(b.title));
 
-            // Build knowledge domain code-to-name map using KnowledgeDomainHelper directly
-            const domainHelper = KnowledgeDomainHelper.getInstance(this.app);
-            await domainHelper.loadDomainTemplate();
-            const ddcCodeToNameMap = domainHelper.getDomainCodeToNameMap();
-
-            // Convert DDC codes to domain names and store as string array
-            const enhancedResults = sortedResults.map(result => {
-                // Handle legacy data format (string) or new format (array)
-                let domainCodes: string[] = [];
-                
-                // TypeScript doesn't know about the old property, so we need to use type assertion
-                const oldResult = result as any;
-                if (oldResult.knowledgeDomain && typeof oldResult.knowledgeDomain === 'string') {
-                    domainCodes = oldResult.knowledgeDomain.split(',')
-                        .map((code: string) => code.trim())
-                        .filter((code: string) => code.length > 0);
-                } else if (result.knowledgeDomains && Array.isArray(result.knowledgeDomains)) {
-                    domainCodes = result.knowledgeDomains;
-                }
-                
-                // Convert codes to names
-                const domainNames = domainCodes.map(code => ddcCodeToNameMap.get(code) || code);
-                
-                // Create a clean result object with the new format
-                const cleanResult: VaultAnalysisResult = {
-                    id: result.id,
-                    title: result.title,
-                    summary: result.summary,
-                    keywords: result.keywords,
-                    knowledgeDomains: domainNames,
-                    created: result.created,
-                    modified: result.modified,
-                    path: result.path,
-                    charCount: result.charCount ?? (result as { wordCount?: number }).wordCount ?? 0
-                };
-                
-                // Add optional properties if they exist
-                if (result.graphMetrics) {
-                    cleanResult.graphMetrics = result.graphMetrics;
-                }
-                
-                if (result.centralityRankings) {
-                    cleanResult.centralityRankings = result.centralityRankings;
-                }
-                
-                return cleanResult;
-            });
-            
-            // Create the output data with metadata
-            let outputData: VaultAnalysisData;
-            
+            let metadata: { generatedAt: string; totalFiles: number; generatedFiles: number; updatedFiles: number; tokenUsage?: { promptTokens: number; candidatesTokens: number; totalTokens: number } };
             if (!isIncrementalUpdate) {
-                // First generation: set all generated fields
-                outputData = {
+                metadata = {
                     generatedAt: new Date().toISOString(),
-                    totalFiles: enhancedResults.length,
-                    generatedFiles: enhancedResults.length,
+                    totalFiles: results.length,
+                    generatedFiles: results.length,
                     updatedFiles: 0,
-                    apiProvider: 'Google Gemini',
-                    ...(batchTokenUsage && { tokenUsage: batchTokenUsage }),
-                    results: enhancedResults
+                    ...(batchTokenUsage && { tokenUsage: batchTokenUsage })
                 };
-            } else {
-                // Incremental update: preserve generated fields, update cumulative fields
-                if (existingData) {
-                    // Migrate from old format if needed
-                    const existingGeneratedFiles = existingData.generatedFiles ?? existingData.totalFiles;
-                    const existingUpdatedFiles = existingData.updatedFiles ?? 0;
-                    
-                    // Add to cumulative updated counts
-                    const cumulativeUpdatedFiles = existingUpdatedFiles + newCount + changedCount;
-                    
-                    // Add new batch token usage to existing cumulative total
-                    const existingTokens = existingData.tokenUsage ?? { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 };
-                    const tokenUsage = batchTokenUsage ? {
+            } else if (existingData) {
+                const existingGeneratedFiles = existingData.generatedFiles ?? existingData.totalFiles;
+                const existingUpdatedFiles = existingData.updatedFiles ?? 0;
+                const existingTokens = existingData.tokenUsage ?? { promptTokens: 0, candidatesTokens: 0, totalTokens: 0 };
+                metadata = {
+                    generatedAt: existingData.generatedAt,
+                    totalFiles: results.length,
+                    generatedFiles: existingGeneratedFiles,
+                    updatedFiles: existingUpdatedFiles + newCount + changedCount,
+                    tokenUsage: batchTokenUsage ? {
                         promptTokens: existingTokens.promptTokens + batchTokenUsage.promptTokens,
                         candidatesTokens: existingTokens.candidatesTokens + batchTokenUsage.candidatesTokens,
                         totalTokens: existingTokens.totalTokens + batchTokenUsage.totalTokens
-                    } : existingData.tokenUsage;
-                    
-                    outputData = {
-                        generatedAt: existingData.generatedAt,
-                        updatedAt: new Date().toISOString(),
-                        totalFiles: enhancedResults.length,
-                        generatedFiles: existingGeneratedFiles,
-                        updatedFiles: cumulativeUpdatedFiles,
-                        apiProvider: 'Google Gemini',
-                        ...(tokenUsage && { tokenUsage }),
-                        results: enhancedResults
-                    };
-                } else {
-                    // No existing data (shouldn't happen in incremental update, but handle gracefully)
-                    outputData = {
-                        generatedAt: new Date().toISOString(),
-                        totalFiles: enhancedResults.length,
-                        generatedFiles: enhancedResults.length,
-                        ...(batchTokenUsage && { tokenUsage: batchTokenUsage }),
-                        updatedFiles: 0,
-                        apiProvider: 'Google Gemini',
-                        results: enhancedResults
-                    };
-                }
+                    } : existingData.tokenUsage
+                };
+            } else {
+                metadata = {
+                    generatedAt: new Date().toISOString(),
+                    totalFiles: results.length,
+                    generatedFiles: results.length,
+                    updatedFiles: 0,
+                    ...(batchTokenUsage && { tokenUsage: batchTokenUsage })
+                };
             }
-            
-            // Ensure responses directory exists
+
+            const { outputData } = await this.buildEnhancedResultsAndOutputData(results, isIncrementalUpdate, metadata);
             await this.ensureResponsesDirectory();
-            
-            // Save to responses folder
-            const filePath = this.getVaultAnalysisFilePath();
-            
-            // Write the file
-            await this.app.vault.adapter.write(filePath, JSON.stringify(outputData, null, 2));
-            
-            console.log(`Vault analysis results saved to responses folder: ${filePath}`);
+            await this.app.vault.adapter.write(this.getVaultAnalysisFilePath(), JSON.stringify(outputData, null, 2));
+            console.log(`Vault analysis results saved to responses folder: ${this.getVaultAnalysisFilePath()}`);
         } catch (error) {
             console.error('Failed to save analysis results:', error);
             throw new Error(`Failed to save results: ${(error as Error).message}`);
@@ -1332,8 +1393,11 @@ For each note, provide:
         try {
             // Use structured output instead of deprecated generateBatchAnalysis
             const responseSchema = this.aiService.createVaultSemanticAnalysisSchema(meaningfulFiles.length);
-            
-                                        // Add debugging info
+
+            // 1024 tokens per note + 4K buffer for schema overhead
+            const maxOutputTokens = meaningfulFiles.length * 1024 + 4000;
+
+            // Add debugging info
             console.log(`Structured analysis: ${meaningfulFiles.length} notes, prompt length: ${fullPrompt.length} chars`);
             console.log('Response schema:', JSON.stringify(responseSchema, null, 2));
             
@@ -1344,8 +1408,8 @@ For each note, provide:
             }>>(
                 fullPrompt,
                 responseSchema,
-                meaningfulFiles.length * 300 + 500, // Token limit for batch (300 per note + overhead)
-                0.2, // Low temperature for consistent results
+                maxOutputTokens,
+                0.3, // Low temperature for consistent results
                 0.72, // Default topP
                 modelOverride
             );
@@ -1363,18 +1427,7 @@ For each note, provide:
 
         } catch (structuredError) {
             console.error('Structured output batch analysis failed:', structuredError);
-            
-            console.log('Structured analysis failed - no fallback available. Creating default results.');
-            
-            // Create default results for each file when structured analysis fails
-            return {
-                results: meaningfulFiles.map((data) => ({
-                    summary: `Analysis failed for ${data.file.basename} - structured analysis error`,
-                    keywords: '',
-                    knowledgeDomain: ''
-                })),
-                tokenUsage: this.ZERO_TOKEN_USAGE
-            };
+            throw structuredError;
         }
     }
 }

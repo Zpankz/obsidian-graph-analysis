@@ -1,6 +1,6 @@
 import { App, Notice, Modal, setIcon } from 'obsidian';
 import { GraphAnalysisSettings } from '../types/types';
-import { AIModelService, SEMANTIC_MODELS } from '../services/AIModelService';
+import { AIModelService, SEMANTIC_MODELS, SemanticAnalysisError } from '../services/AIModelService';
 import { cleanupNoteContent } from '../utils/NoteContentUtils';
 
 export class AISummaryManager {
@@ -116,20 +116,43 @@ For the note, provide:
             const fullPrompt = `${systemPrompt}\n\n${contextPrompt}\n\n${instructionPrompt}\n\n--- Note: "${fileName}" (${cleanedContent.split(/\s+/).length} words) ---\n${cleanedContent}`;
 
             const modelOverride = SEMANTIC_MODELS[this.semanticModelCounter++ % 2];
-            const response = await this.aiService.generateSemanticAnalysis<{
-                keyWords: string;
-                keyPoints: string;
-            }>(
-                fullPrompt,
-                responseSchema,
-                1200, // Appropriate token limit for single note
-                0.2, // Low temperature for consistent results
-                0.72, // Default topP
-                modelOverride
-            );
+            let response;
+            try {
+                response = await this.aiService.generateSemanticAnalysis<{
+                    keyWords: string;
+                    keyPoints: string;
+                }>(
+                    fullPrompt,
+                    responseSchema,
+                    1200, // Appropriate token limit for single note
+                    0.2, // Low temperature for consistent results
+                    0.72, // Default topP
+                    modelOverride
+                );
+            } catch (firstError) {
+                if (firstError instanceof SemanticAnalysisError && firstError.errorType === 'quota_exhausted') {
+                    throw new Error('Free-tier daily limit reached. Retry tomorrow.');
+                }
+                if (firstError instanceof SemanticAnalysisError && firstError.errorType === 'rate_limit') {
+                    const alternateModel = SEMANTIC_MODELS[this.semanticModelCounter++ % 2];
+                    response = await this.aiService.generateSemanticAnalysis<{
+                        keyWords: string;
+                        keyPoints: string;
+                    }>(
+                        fullPrompt,
+                        responseSchema,
+                        1200,
+                        0.2,
+                        0.72,
+                        alternateModel
+                    );
+                } else {
+                    throw firstError;
+                }
+            }
 
             // Extract the result (single object, not array)
-            const analysis = response.result;
+            const analysis = response!.result;
             const wordCount = content.split(/\s+/).length;
 
             // Format the summary text for display
@@ -152,10 +175,17 @@ For the note, provide:
             });
         } catch (error) {
             console.error('Structured analysis failed:', error);
-            
-            // Provide more specific error messages
+
             let errorMessage = 'Unknown error occurred';
-            if (error instanceof Error) {
+            if (error instanceof SemanticAnalysisError) {
+                if (error.errorType === 'quota_exhausted') {
+                    errorMessage = 'Free-tier daily limit reached. Retry tomorrow.';
+                } else if (error.errorType === 'rate_limit') {
+                    errorMessage = 'API rate limit exceeded. Please try again later.';
+                } else {
+                    errorMessage = error.message;
+                }
+            } else if (error instanceof Error) {
                 if (error.message.includes('401') || error.message.includes('403')) {
                     errorMessage = 'Invalid API key. Please check your Gemini API key in settings.';
                 } else if (error.message.includes('429')) {
@@ -166,7 +196,7 @@ For the note, provide:
                     errorMessage = error.message;
                 }
             }
-            
+
             throw new Error(errorMessage);
         }
     }
