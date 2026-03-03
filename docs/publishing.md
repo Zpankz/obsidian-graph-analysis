@@ -80,8 +80,7 @@ The release process is automated using a GitHub Action workflow defined in `.git
 ### Release workflow did not trigger
 
 1. **Tags are not pushed by `git push`** — Run `git push origin <tag>` or `git push --follow-tags` after pushing commits.
-2. **Manual trigger** — Go to Actions → "Release Obsidian plugin" → "Run workflow", enter the tag (e.g. `v0.5.2`), then Run.
-3. **Check Actions** — Ensure GitHub Actions are enabled (Settings → Actions → General).
+2. **Check Actions** — Ensure GitHub Actions are enabled (Settings → Actions → General).
 
 ### If the GitHub Action fails:
 
