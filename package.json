@@ -33,6 +33,7 @@
     "url": "https://github.com/luolanaaTUD/obsidian-graph-analysis/issues"
   },
   "homepage": "https://github.com/luolanaaTUD/obsidian-graph-analysis#readme",
+  "tagVersionPrefix": "",
   "devDependencies": {
     "@types/chroma-js": "^3.1.1",
     "@types/d3-array": "^3.2.1",

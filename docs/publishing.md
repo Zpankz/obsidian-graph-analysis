@@ -10,40 +10,35 @@ This document outlines how to release new versions of the Obsidian Graph Analysi
 
 ## Release Process
 
-### 1. Update Version Numbers
+### 1. Bump Version and Create Tag
 
-1. Update the version in `package.json`:
+Run one of these (they bump version, update manifest/versions.json, commit, and create a tag):
 
-   ```bash
-   npm version patch # For bug fixes
-   # or
-   npm version minor # For new features
-   # or
-   npm version major # For breaking changes
-   ```
+```bash
+npm version patch   # For bug fixes (0.5.0 → 0.5.1)
+# or
+npm version minor   # For new features (0.5.0 → 0.6.0)
+# or
+npm version major   # For breaking changes (0.5.0 → 1.0.0)
+```
 
-   This will automatically:
-   - Update the version in `package.json`
-   - Update `manifest.json` via the version-bump script
-   - Update `versions.json` with the new version
-   - Create a git commit with the version change
+**Reminder:** `package.json` has `"tagVersionPrefix": ""` so tags match the manifest version without a `v` prefix (e.g. `0.5.1` not `v0.5.1`). Obsidian requires this format.
 
-### 2. Push Changes and Create a Tag
+### 2. Push Commit and Tag
 
-1. Push the changes to GitHub:
+`npm version` does **not** push. You must push both the commit and the tag:
 
-   ```bash
-   git push
-   ```
+```bash
+git push
+git push --follow-tags
+```
 
-2. Create and push a tag:
+Or push the tag explicitly (replace with your actual version):
 
-   ```bash
-   git tag -a 1.0.0 -m "Release v1.0.0"
-   git push origin 1.0.0
-   ```
-
-   Replace `1.0.0` with your actual version number.
+```bash
+git push
+git push origin 0.5.1
+```
 
 ### 3. GitHub Actions Automation
 
