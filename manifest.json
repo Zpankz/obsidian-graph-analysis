@@ -3,7 +3,7 @@
 	"name": "Graph Analysis",
 	"version": "0.5.0",
 	"minAppVersion": "1.7.2",
-	"description": "Analyze Obsidian vault using graph algorithms with Rust WASM for high-performance to provide insights into note structure and relationships ",
+	"description": "Analyze Obsidian vault using graph algorithms with Rust WASM for high-performance to provide insights into note structure and relationships",
 	"author": "wluo",
 	"authorUrl": "https://github.com/luolanaaTUD",
 	"isDesktopOnly": false

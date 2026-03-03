@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 
 # Build the project
 echo "Building project..."
-npm run full-build
+npm run build
 
 # Create plugin directory inside release
 cd release

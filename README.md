@@ -30,7 +30,7 @@ This plugin takes a different approach. It first computes real graph metrics —
 
 ### Manual Installation
 
-1. Download the latest release from the [releases page](https://github.com/yourusername/obsidian-graph-analysis/releases)
+1. Download the latest release from the [releases page](https://github.com/luolanaaTUD/obsidian-graph-analysis/releases)
 2. Extract the zip into your vault's `.obsidian/plugins/` directory
 3. Enable **Graph Analysis** in Obsidian settings under Community Plugins
 

@@ -27,12 +27,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/wluo/obsidian-graph-analysis"
+    "url": "https://github.com/luolanaaTUD/obsidian-graph-analysis"
   },
   "bugs": {
-    "url": "https://github.com/wluo/obsidian-graph-analysis/issues"
+    "url": "https://github.com/luolanaaTUD/obsidian-graph-analysis/issues"
   },
-  "homepage": "https://github.com/wluo/obsidian-graph-analysis#readme",
+  "homepage": "https://github.com/luolanaaTUD/obsidian-graph-analysis#readme",
   "devDependencies": {
     "@types/chroma-js": "^3.1.1",
     "@types/d3-array": "^3.2.1",
