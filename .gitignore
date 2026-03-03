@@ -55,6 +55,7 @@ $RECYCLE.BIN/
 # IDE files
 .idea/
 .vscode/
+.cursor/
 *.swp
 *.swo
 .project
