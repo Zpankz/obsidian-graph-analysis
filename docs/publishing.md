@@ -40,6 +40,8 @@ git push
 git push origin 0.5.1
 ```
 
+**Important:** `git push` does **not** push tags. You must run `git push --follow-tags` or `git push origin <tag>` separately.
+
 ### 3. GitHub Actions Automation
 
 Once you push a tag, GitHub Actions will automatically:
@@ -75,7 +77,13 @@ The release process is automated using a GitHub Action workflow defined in `.git
 
 ## Troubleshooting
 
-If the GitHub Action fails:
+### Release workflow did not trigger
+
+1. **Tags are not pushed by `git push`** — Run `git push origin <tag>` or `git push --follow-tags` after pushing commits.
+2. **Manual trigger** — Go to Actions → "Release Obsidian plugin" → "Run workflow", enter the tag (e.g. `v0.5.2`), then Run.
+3. **Check Actions** — Ensure GitHub Actions are enabled (Settings → Actions → General).
+
+### If the GitHub Action fails:
 
 1. Check the action logs for errors
 2. Ensure that the Rust code compiles correctly
