@@ -3070,6 +3070,32 @@ button.is-disabled {
     flex-wrap: wrap;
 }
 
+.subgraph-reset-view-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 10;
+    padding: 0;
+    margin: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.subgraph-reset-view-btn svg {
+    display: block;
+    transform: scale(0.8);
+}
+
+.subgraph-reset-view-btn:hover {
+    color: var(--text-normal);
+}
+
 .subgraph-legend-item {
     display: flex;
     align-items: center;

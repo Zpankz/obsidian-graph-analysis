@@ -43,6 +43,7 @@ export class ConnectionSubGraph {
     // D3 state
     private svg!: d3.Selection<SVGSVGElement, unknown, null, undefined>;
     private svgGroup!: d3.Selection<SVGGElement, unknown, null, undefined>;
+    private zoomBehavior!: d3.ZoomBehavior<SVGSVGElement, unknown>;
     private simulation!: d3.Simulation<SubGraphNode, SubGraphLink>;
     private nodes: SubGraphNode[] = [];
     private links: SubGraphLink[] = [];
@@ -163,13 +164,34 @@ export class ConnectionSubGraph {
 
         this.svgGroup = this.svg.append('g');
 
-        // Zoom and pan
-        const zoom = d3.zoom<SVGSVGElement, unknown>()
+        // Zoom and pan - constrain pan so graph stays findable (viewport must overlap content area)
+        this.zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
             .scaleExtent([0.3, 4])
+            .translateExtent([
+                [-this.width * 1.5, -this.height * 1.5],
+                [this.width / 2, this.height / 2]
+            ])
             .on('zoom', (event) => {
                 this.svgGroup.attr('transform', event.transform);
             });
-        this.svg.call(zoom);
+        this.svg.call(this.zoomBehavior);
+
+        // Reset view - icon only, no button chrome (div avoids default button styling)
+        const resetBtn = svgWrapper.createEl('div', { cls: 'subgraph-reset-view-btn' });
+        resetBtn.setAttribute('role', 'button');
+        resetBtn.setAttribute('tabindex', '0');
+        setIcon(resetBtn, 'refresh-cw');
+        resetBtn.title = 'Reset view';
+        resetBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.resetView();
+        });
+        resetBtn.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                this.resetView();
+            }
+        });
     }
 
     private createTooltip(): void {
@@ -389,6 +411,12 @@ export class ConnectionSubGraph {
             const dot = row.createEl('span', { cls: `legend-dot ${item.cls}` });
             row.createEl('span', { text: item.label, cls: 'legend-text' });
         }
+    }
+
+    private resetView(): void {
+        this.svg.transition()
+            .duration(300)
+            .call(this.zoomBehavior.transform, d3.zoomIdentity);
     }
 
     // ─────────────────── Add to Graph Button ───────────────────
