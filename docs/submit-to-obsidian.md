@@ -20,6 +20,11 @@ git commit -m "Add Knowledge Graph Analysis plugin"   # or amend if branch alrea
 git push fork add-obsidian-graph-analysis
 ```
 
+```bash
+cd obsidian-releases-fork
+git push fork add-obsidian-graph-analysis --force-with-lease
+```
+
 ## Step 3: Open a Pull Request
 
 1. Go to https://github.com/luolanaaTUD/obsidian-releases

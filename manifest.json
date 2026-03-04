@@ -6,5 +6,5 @@
 	"description": "Analyze your vault using graph algorithms with Rust WASM for high-performance insights into note structure and relationships.",
 	"author": "wluo",
 	"authorUrl": "https://github.com/luolanaaTUD",
-	"isDesktopOnly": false
+	"isDesktopOnly": true
 }
