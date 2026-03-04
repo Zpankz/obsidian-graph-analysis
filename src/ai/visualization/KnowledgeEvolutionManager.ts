@@ -1,4 +1,4 @@
-import { App, setIcon } from 'obsidian';
+import { App, setIcon, MarkdownRenderer, Component } from 'obsidian';
 import { GraphAnalysisSettings } from '../../types/types';
 import { KnowledgeCalendarChart } from '../../components/calendar-chart/KnowledgeCalendarChart';
 
@@ -74,6 +74,15 @@ export class KnowledgeEvolutionManager {
     private calendarChart: KnowledgeCalendarChart | null = null;
     private createEmptyStateFn: (container: HTMLElement, message: string) => void;
 
+    private get markdownComponent(): Component {
+        const plugins = (this.app as { plugins?: { plugins?: Record<string, Component> } }).plugins?.plugins;
+        const plugin = plugins?.['knowledge-graph-analysis'];
+        if (!plugin || !(plugin instanceof Component)) {
+            throw new Error('Plugin not found - cannot render markdown safely');
+        }
+        return plugin;
+    }
+
     constructor(app: App, settings: GraphAnalysisSettings, createEmptyStateFn?: (container: HTMLElement, message: string) => void) {
         this.app = app;
         this.settings = settings;
@@ -142,28 +151,21 @@ export class KnowledgeEvolutionManager {
     }
 
     private renderPlaceholder(): void {
-        this.container.innerHTML = `
-            <div class="evolution-placeholder">
-                <div class="placeholder-content">
-                    <h3>📈 Knowledge Evolution Analysis</h3>
-                    <p>Generate vault analysis to see your knowledge evolution insights.</p>
-                    <div class="placeholder-features">
-                        <div class="feature-item">
-                            <span class="feature-icon">📅</span>
-                            <span>Activity Calendar</span>
-                        </div>
-                        <div class="feature-item">
-                            <span class="feature-icon">🌊</span>
-                            <span>Learning Trends</span>
-                        </div>
-                        <div class="feature-item">
-                            <span class="feature-icon">🎯</span>
-                            <span>Focus Evolution</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
+        const placeholder = this.container.createEl('div', { cls: 'evolution-placeholder' });
+        const content = placeholder.createEl('div', { cls: 'placeholder-content' });
+        content.createEl('h3', { text: '📈 Knowledge Evolution Analysis' });
+        content.createEl('p', { text: 'Generate vault analysis to see your knowledge evolution insights.' });
+        const features = content.createEl('div', { cls: 'placeholder-features' });
+        const items = [
+            { icon: '📅', text: 'Activity Calendar' },
+            { icon: '🌊', text: 'Learning Trends' },
+            { icon: '🎯', text: 'Focus Evolution' }
+        ];
+        items.forEach(({ icon, text }) => {
+            const item = features.createEl('div', { cls: 'feature-item' });
+            item.createEl('span', { cls: 'feature-icon', text: icon });
+            item.createEl('span', { text });
+        });
 
         // Still show the calendar even without AI insights
         this.renderBasicCalendar();
@@ -171,7 +173,7 @@ export class KnowledgeEvolutionManager {
 
     private async renderBasicCalendar(): Promise<void> {
         const calendarSection = this.container.createEl('div', { cls: 'evolution-calendar-section' });
-        calendarSection.innerHTML = '<h3>📅 Knowledge Activity Calendar</h3>';
+        calendarSection.createEl('h3', { text: '📅 Knowledge Activity Calendar' });
         
         const calendarContainer = calendarSection.createEl('div', { cls: 'calendar-container' });
         
@@ -202,26 +204,25 @@ export class KnowledgeEvolutionManager {
     }
 
     private createInsightsOverview(container: HTMLElement): void {
-        container.innerHTML = `
-            <h3>🧠 Knowledge Evolution Insights</h3>
-            <div class="evolution-insights-grid">
-                ${this.data!.insights.map(insight => `
-                    <div class="evolution-insight-card">
-                        <h4>${insight.title}</h4>
-                        <p>${insight.content}</p>
-                        ${insight.keyPoints.length > 0 ? `
-                            <ul class="insight-points">
-                                ${insight.keyPoints.map(point => `<li>${point}</li>`).join('')}
-                            </ul>
-                        ` : ''}
-                    </div>
-                `).join('')}
-            </div>
-        `;
+        container.createEl('h3', { text: '🧠 Knowledge Evolution Insights' });
+        const grid = container.createEl('div', { cls: 'evolution-insights-grid' });
+        this.data!.insights.forEach(insight => {
+            const card = grid.createEl('div', { cls: 'evolution-insight-card' });
+            card.createEl('h4', { text: insight.title });
+            const contentEl = card.createEl('p');
+            MarkdownRenderer.render(this.app, insight.content, contentEl, '', this.markdownComponent);
+            if (insight.keyPoints.length > 0) {
+                const ul = card.createEl('ul', { cls: 'insight-points' });
+                insight.keyPoints.forEach(point => {
+                    const li = ul.createEl('li');
+                    MarkdownRenderer.render(this.app, point, li, '', this.markdownComponent);
+                });
+            }
+        });
     }
 
     private async createEnhancedCalendar(container: HTMLElement): Promise<void> {
-        container.innerHTML = '<h3>📅 Knowledge Activity Timeline</h3>';
+        container.createEl('h3', { text: '📅 Knowledge Activity Timeline' });
         
         // Add timeline phases overview above calendar
         this.createTimelinePhases(container);
@@ -246,61 +247,41 @@ export class KnowledgeEvolutionManager {
 
     private createTimelinePhases(container: HTMLElement): void {
         const phasesContainer = container.createEl('div', { cls: 'timeline-phases' });
-        
-        phasesContainer.innerHTML = `
-            <h4>📊 Knowledge Development Phases</h4>
-            <div class="phases-timeline">
-                ${this.data!.timeline.phases.map(phase => `
-                    <div class="phase-item">
-                        <div class="phase-period">${phase.period}</div>
-                        <div class="phase-description">${phase.description}</div>
-                        <div class="phase-domains">
-                            ${phase.keyDomains.slice(0, 3).map(domain => {
-                                // Parse DDC-compliant domain names for cleaner display
-                                const domainParts = domain.match(/^(.+?)\s*\((.+)\)$/) || [null, domain, ''];
-                                const userDomain = domainParts[1] || domain;
-                                const hierarchy = domainParts[2] || '';
-                                
-                                return `<span class="domain-tag" title="${hierarchy ? `${userDomain} (${hierarchy})` : userDomain}">
-                                    ${userDomain}
-                                </span>`;
-                            }).join('')}
-                        </div>
-                        <div class="phase-metrics">
-                            ${phase.metrics.noteCount} notes • ${phase.metrics.wordCount.toLocaleString()} words
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-        `;
+        phasesContainer.createEl('h4', { text: '📊 Knowledge Development Phases' });
+        const timeline = phasesContainer.createEl('div', { cls: 'phases-timeline' });
+        this.data!.timeline.phases.forEach(phase => {
+            const item = timeline.createEl('div', { cls: 'phase-item' });
+            item.createEl('div', { cls: 'phase-period', text: phase.period });
+            item.createEl('div', { cls: 'phase-description', text: phase.description });
+            const domainsEl = item.createEl('div', { cls: 'phase-domains' });
+            phase.keyDomains.slice(0, 3).forEach(domain => {
+                const domainParts = domain.match(/^(.+?)\s*\((.+)\)$/) || [null, domain, ''];
+                const userDomain = domainParts[1] || domain;
+                const hierarchy = domainParts[2] || '';
+                const tag = domainsEl.createEl('span', { cls: 'domain-tag' });
+                tag.setAttribute('title', hierarchy ? `${userDomain} (${hierarchy})` : userDomain);
+                tag.setText(userDomain);
+            });
+            const metrics = item.createEl('div', { cls: 'phase-metrics' });
+            metrics.setText(`${phase.metrics.noteCount} notes • ${phase.metrics.wordCount.toLocaleString()} words`);
+        });
     }
 
     private addVelocityOverlay(container: HTMLElement): void {
         const velocityContainer = container.createEl('div', { cls: 'velocity-overlay' });
-        
-        velocityContainer.innerHTML = `
-            <h4>⚡ Learning Velocity Trends</h4>
-            <div class="velocity-trends">
-                <div class="trend-item">
-                    <span class="trend-label">Productivity:</span>
-                    <span class="trend-value ${this.data!.timeline.trends.productivity}">
-                        ${this.getTrendIcon(this.data!.timeline.trends.productivity)} ${this.data!.timeline.trends.productivity}
-                    </span>
-                </div>
-                <div class="trend-item">
-                    <span class="trend-label">Diversity:</span>
-                    <span class="trend-value ${this.data!.timeline.trends.diversity}">
-                        ${this.getTrendIcon(this.data!.timeline.trends.diversity)} ${this.data!.timeline.trends.diversity}
-                    </span>
-                </div>
-                <div class="trend-item">
-                    <span class="trend-label">Depth:</span>
-                    <span class="trend-value ${this.data!.timeline.trends.depth}">
-                        ${this.getTrendIcon(this.data!.timeline.trends.depth)} ${this.data!.timeline.trends.depth}
-                    </span>
-                </div>
-            </div>
-        `;
+        velocityContainer.createEl('h4', { text: '⚡ Learning Velocity Trends' });
+        const trends = velocityContainer.createEl('div', { cls: 'velocity-trends' });
+        const trendData = [
+            { label: 'Productivity', value: this.data!.timeline.trends.productivity },
+            { label: 'Diversity', value: this.data!.timeline.trends.diversity },
+            { label: 'Depth', value: this.data!.timeline.trends.depth }
+        ] as const;
+        trendData.forEach(({ label, value }) => {
+            const item = trends.createEl('div', { cls: 'trend-item' });
+            item.createEl('span', { cls: 'trend-label', text: `${label}:` });
+            const valueEl = item.createEl('span', { cls: `trend-value ${value}` });
+            valueEl.setText(`${this.getTrendIcon(value)} ${value}`);
+        });
     }
 
     private createDetailedAnalysis(container: HTMLElement): void {
@@ -352,72 +333,60 @@ export class KnowledgeEvolutionManager {
 
     private renderFocusShiftsTab(container: HTMLElement): void {
         container.empty();
-        container.innerHTML = `
-            <div class="focus-shifts-content">
-                <h4>${this.data!.focusShift.narrative.title}</h4>
-                <p>${this.data!.focusShift.narrative.content}</p>
-                
-                <div class="shifts-timeline">
-                    ${this.data!.focusShift.shifts.map(shift => `
-                        <div class="shift-item ${shift.type}">
-                            <div class="shift-period">${shift.period}</div>
-                            <div class="shift-type">${shift.type.toUpperCase()} SHIFT</div>
-                            <div class="shift-areas">
-                                ${shift.newAreas.length > 0 ? `<div class="new-areas">🆕 ${shift.newAreas.join(', ')}</div>` : ''}
-                                ${shift.increasedFocus.length > 0 ? `<div class="increased-focus">📈 ${shift.increasedFocus.join(', ')}</div>` : ''}
-                                ${shift.decreasedFocus.length > 0 ? `<div class="decreased-focus">📉 ${shift.decreasedFocus.join(', ')}</div>` : ''}
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
+        const content = container.createEl('div', { cls: 'focus-shifts-content' });
+        content.createEl('h4', { text: this.data!.focusShift.narrative.title });
+        const narrativeEl = content.createEl('p');
+                MarkdownRenderer.render(this.app, this.data!.focusShift.narrative.content, narrativeEl, '', this.markdownComponent);
+        const timeline = content.createEl('div', { cls: 'shifts-timeline' });
+        this.data!.focusShift.shifts.forEach(shift => {
+            const item = timeline.createEl('div', { cls: `shift-item ${shift.type}` });
+            item.createEl('div', { cls: 'shift-period', text: shift.period });
+            item.createEl('div', { cls: 'shift-type', text: `${shift.type.toUpperCase()} SHIFT` });
+            const areas = item.createEl('div', { cls: 'shift-areas' });
+            if (shift.newAreas.length > 0) {
+                areas.createEl('div', { cls: 'new-areas', text: `🆕 ${shift.newAreas.join(', ')}` });
+            }
+            if (shift.increasedFocus.length > 0) {
+                areas.createEl('div', { cls: 'increased-focus', text: `📈 ${shift.increasedFocus.join(', ')}` });
+            }
+            if (shift.decreasedFocus.length > 0) {
+                areas.createEl('div', { cls: 'decreased-focus', text: `📉 ${shift.decreasedFocus.join(', ')}` });
+            }
+        });
     }
 
     private renderTopicPatternsTab(container: HTMLElement): void {
         container.empty();
-        container.innerHTML = `
-            <div class="topic-patterns-content">
-                <h4>${this.data!.topicPatterns.exploration.title}</h4>
-                <p>${this.data!.topicPatterns.exploration.content}</p>
-                
-                <div class="patterns-analysis">
-                    <div class="strategy-info">
-                        <h5>Learning Strategy</h5>
-                        <div class="strategy-details">
-                            <span class="strategy-style">Style: ${this.data!.topicPatterns.strategy.style}</span>
-                            <span class="strategy-consistency">Consistency: ${this.data!.topicPatterns.strategy.consistency}</span>
-                        </div>
-                    </div>
-                    
-                    <div class="introduction-timeline">
-                        <h5>Topic Introduction Timeline</h5>
-                        ${this.data!.topicPatterns.introductionTimeline.map(period => `
-                            <div class="introduction-period">
-                                <div class="period-header">
-                                    <span class="period-name">${period.period}</span>
-                                    <span class="acquisition-pattern ${period.acquisitionPattern}">${period.acquisitionPattern}</span>
-                                </div>
-                                ${period.newDomains.length > 0 ? `
-                                    <div class="new-domains">
-                                        ${period.newDomains.map(domain => {
-                                            // Parse DDC-compliant domain names for cleaner display
-                                            const domainParts = domain.match(/^(.+?)\s*\((.+)\)$/) || [null, domain, ''];
-                                            const userDomain = domainParts[1] || domain;
-                                            const hierarchy = domainParts[2] || '';
-                                            
-                                            return `<span class="domain-tag" title="${hierarchy ? `${userDomain} (${hierarchy})` : userDomain}">
-                                                ${userDomain}
-                                            </span>`;
-                                        }).join('')}
-                                    </div>
-                                ` : ''}
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            </div>
-        `;
+        const content = container.createEl('div', { cls: 'topic-patterns-content' });
+        content.createEl('h4', { text: this.data!.topicPatterns.exploration.title });
+        const explorationEl = content.createEl('p');
+        MarkdownRenderer.render(this.app, this.data!.topicPatterns.exploration.content, explorationEl, '', this.markdownComponent);
+        const patterns = content.createEl('div', { cls: 'patterns-analysis' });
+        const strategyInfo = patterns.createEl('div', { cls: 'strategy-info' });
+        strategyInfo.createEl('h5', { text: 'Learning Strategy' });
+        const details = strategyInfo.createEl('div', { cls: 'strategy-details' });
+        details.createEl('span', { cls: 'strategy-style', text: `Style: ${this.data!.topicPatterns.strategy.style}` });
+        details.createEl('span', { cls: 'strategy-consistency', text: `Consistency: ${this.data!.topicPatterns.strategy.consistency}` });
+        const introTimeline = patterns.createEl('div', { cls: 'introduction-timeline' });
+        introTimeline.createEl('h5', { text: 'Topic Introduction Timeline' });
+        const timelineContainer = introTimeline.createEl('div', { cls: 'introduction-timeline-items' });
+        this.data!.topicPatterns.introductionTimeline.forEach(period => {
+            const periodEl = timelineContainer.createEl('div', { cls: 'introduction-period' });
+            const header = periodEl.createEl('div', { cls: 'period-header' });
+            header.createEl('span', { cls: 'period-name', text: period.period });
+            header.createEl('span', { cls: `acquisition-pattern ${period.acquisitionPattern}`, text: period.acquisitionPattern });
+            if (period.newDomains.length > 0) {
+                const domainsEl = periodEl.createEl('div', { cls: 'new-domains' });
+                period.newDomains.forEach(domain => {
+                    const domainParts = domain.match(/^(.+?)\s*\((.+)\)$/) || [null, domain, ''];
+                    const userDomain = domainParts[1] || domain;
+                    const hierarchy = domainParts[2] || '';
+                    const tag = domainsEl.createEl('span', { cls: 'domain-tag' });
+                    tag.setAttribute('title', hierarchy ? `${userDomain} (${hierarchy})` : userDomain);
+                    tag.setText(userDomain);
+                });
+            }
+        });
     }
 
 

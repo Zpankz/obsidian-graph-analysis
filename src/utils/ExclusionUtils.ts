@@ -1,4 +1,4 @@
-import { TFile, App } from 'obsidian';
+import { TFile, App, normalizePath } from 'obsidian';
 import { GraphAnalysisSettings } from '../types/types';
 
 export class ExclusionUtils {
@@ -120,17 +120,16 @@ export class ExclusionUtils {
     }
 
     /**
-     * Normalize folder path for consistent comparison
+     * Normalize folder path for consistent comparison using Obsidian's normalizePath
      */
     private normalizeFolderPath(folder: string): string {
+        // Use Obsidian's normalizePath for user-defined paths (handles ., .., slashes)
+        let normalized = normalizePath(folder.trim());
         // Remove leading/trailing slashes and ensure it ends with a slash for proper prefix matching
-        let normalized = folder.replace(/^\/+|\/+$/g, '');
-        
-        // If not empty, ensure it ends with a slash for proper directory matching
+        normalized = normalized.replace(/^\/+|\/+$/g, '');
         if (normalized && !normalized.endsWith('/')) {
             normalized += '/';
         }
-        
         return normalized;
     }
 

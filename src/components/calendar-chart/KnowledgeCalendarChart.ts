@@ -196,23 +196,16 @@ export class KnowledgeCalendarChart {
             vaultDuration = `${daysDiff.toLocaleString()} days`;
         }
         
-        // Create summary stats HTML
-        summaryContainer.innerHTML = `
-            <div class="calendar-summary-stats">
-                <div class="summary-stat">
-                    <span class="stat-label">Vault Duration</span>
-                    <span class="stat-value">${vaultDuration}</span>
-                </div>
-                <div class="summary-stat">
-                    <span class="stat-label">Total Notes</span>
-                    <span class="stat-value">${totalNotes.toLocaleString()}</span>
-                </div>
-                <div class="summary-stat">
-                    <span class="stat-label">Total Words</span>
-                    <span class="stat-value">${totalWords.toLocaleString()}</span>
-                </div>
-            </div>
-        `;
+        const stats = summaryContainer.createEl('div', { cls: 'calendar-summary-stats' });
+        [
+            { label: 'Vault Duration', value: vaultDuration },
+            { label: 'Total Notes', value: totalNotes.toLocaleString() },
+            { label: 'Total Words', value: totalWords.toLocaleString() }
+        ].forEach(({ label, value }) => {
+            const stat = stats.createEl('div', { cls: 'summary-stat' });
+            stat.createEl('span', { cls: 'stat-label', text: label });
+            stat.createEl('span', { cls: 'stat-value', text: value });
+        });
     }
 
     private createCalendarChart(container: HTMLElement): void {
@@ -468,13 +461,10 @@ export class KnowledgeCalendarChart {
         const wordCount = dayData?.wordCount || 0;
         const fileCount = dayData?.fileCount || 0;
         
-        tooltip.innerHTML = `
-            <div class="tooltip-date">${dateStr}</div>
-            <div class="tooltip-stats">
-                <div>${wordCount.toLocaleString()} words written</div>
-                ${fileCount > 0 ? `<div>${fileCount} file${fileCount !== 1 ? 's' : ''} modified</div>` : '<div>No activity</div>'}
-            </div>
-        `;
+        tooltip.createEl('div', { cls: 'tooltip-date', text: dateStr });
+        const stats = tooltip.createEl('div', { cls: 'tooltip-stats' });
+        stats.createEl('div', { text: `${wordCount.toLocaleString()} words written` });
+        stats.createEl('div', { text: fileCount > 0 ? `${fileCount} file${fileCount !== 1 ? 's' : ''} modified` : 'No activity' });
         
         document.body.appendChild(tooltip);
         

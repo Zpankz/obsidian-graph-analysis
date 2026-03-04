@@ -126,32 +126,16 @@ export class KnowledgeActionsManager {
     }
 
     private renderPlaceholder(): void {
-        this.container.innerHTML = `
-            <div class="actions-placeholder">
-                <div class="placeholder-content">
-                    <h3>🎯 Recommended Actions</h3>
-                    <p>Generate vault analysis to see personalized action recommendations.</p>
-                    <div class="placeholder-features">
-                        <div class="feature-item">
-                            <span class="feature-icon">🔧</span>
-                            <span>Knowledge Maintenance</span>
-                        </div>
-                        <div class="feature-item">
-                            <span class="feature-icon">🔗</span>
-                            <span>Connection Opportunities</span>
-                        </div>
-                        <div class="feature-item">
-                            <span class="feature-icon">🗺️</span>
-                            <span>Learning Paths</span>
-                        </div>
-                        <div class="feature-item">
-                            <span class="feature-icon">📁</span>
-                            <span>Organization Tips</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
+        const placeholder = this.container.createEl('div', { cls: 'actions-placeholder' });
+        const content = placeholder.createEl('div', { cls: 'placeholder-content' });
+        content.createEl('h3', { text: '🎯 Recommended Actions' });
+        content.createEl('p', { text: 'Generate vault analysis to see personalized action recommendations.' });
+        const features = content.createEl('div', { cls: 'placeholder-features' });
+        [{ icon: '🔧', text: 'Knowledge Maintenance' }, { icon: '🔗', text: 'Connection Opportunities' }, { icon: '🗺️', text: 'Learning Paths' }, { icon: '📁', text: 'Organization Tips' }].forEach(({ icon, text }) => {
+            const item = features.createEl('div', { cls: 'feature-item' });
+            item.createEl('span', { cls: 'feature-icon', text: icon });
+            item.createEl('span', { text });
+        });
     }
 
     private createActionsLayout(): void {
@@ -170,206 +154,136 @@ export class KnowledgeActionsManager {
 
     private createActionsSummary(container: HTMLElement): void {
         const summaryContainer = container.createEl('div', { cls: 'actions-summary' });
-        
+        summaryContainer.createEl('h3', { text: '📊 Action Summary' });
+        const stats = summaryContainer.createEl('div', { cls: 'summary-stats' });
         const totalActions = this.getTotalActionCount();
         const priorityBreakdown = this.getPriorityBreakdown();
-        
-        summaryContainer.innerHTML = `
-            <h3>📊 Action Summary</h3>
-            <div class="summary-stats">
-                <div class="summary-stat">
-                    <span class="stat-number">${totalActions}</span>
-                    <span class="stat-label">Total Actions</span>
-                </div>
-                <div class="summary-stat priority-high">
-                    <span class="stat-number">${priorityBreakdown.high}</span>
-                    <span class="stat-label">High Priority</span>
-                </div>
-                <div class="summary-stat priority-medium">
-                    <span class="stat-number">${priorityBreakdown.medium}</span>
-                    <span class="stat-label">Medium Priority</span>
-                </div>
-                <div class="summary-stat priority-low">
-                    <span class="stat-number">${priorityBreakdown.low}</span>
-                    <span class="stat-label">Low Priority</span>
-                </div>
-            </div>
-        `;
+        [
+            { num: totalActions, cls: '' },
+            { num: priorityBreakdown.high, cls: 'priority-high' },
+            { num: priorityBreakdown.medium, cls: 'priority-medium' },
+            { num: priorityBreakdown.low, cls: 'priority-low' }
+        ].forEach(({ num, cls }, i) => {
+            const stat = stats.createEl('div', { cls: `summary-stat ${cls}`.trim() });
+            stat.createEl('span', { cls: 'stat-number', text: String(num) });
+            stat.createEl('span', { cls: 'stat-label', text: ['Total Actions', 'High Priority', 'Medium Priority', 'Low Priority'][i] });
+        });
     }
 
     private createMaintenanceSection(container: HTMLElement): void {
         const section = container.createEl('div', { cls: 'actions-section maintenance-section' });
-        
-        section.innerHTML = `
-            <h4>🔧 Knowledge Maintenance</h4>
-            <p class="section-description">Notes that need review, updates, or improvements</p>
-            <div class="actions-list">
-                ${this.data!.maintenance.slice(0, 10).map(action => `
-                    <div class="action-item priority-${action.priority}" data-note-id="${action.noteId}">
-                        <div class="action-header">
-                            <span class="action-title">${action.title}</span>
-                            <span class="action-priority priority-${action.priority}">${action.priority.toUpperCase()}</span>
-                        </div>
-                        <div class="action-reason">${action.reason}</div>
-                        <div class="action-content">${action.action}</div>
-                        <div class="action-buttons">
-                            <button class="action-btn primary" onclick="this.closest('.action-item').openNote()">
-                                📝 Open Note
-                            </button>
-                            <button class="action-btn secondary" onclick="this.closest('.action-item').dismissAction()">
-                                ✓ Mark Done
-                            </button>
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-            ${this.data!.maintenance.length > 10 ? `
-                <div class="show-more">
-                    <button class="show-more-btn">Show ${this.data!.maintenance.length - 10} More Actions</button>
-                </div>
-            ` : ''}
-        `;
-
+        section.createEl('h4', { text: '🔧 Knowledge Maintenance' });
+        section.createEl('p', { cls: 'section-description', text: 'Notes that need review, updates, or improvements' });
+        const list = section.createEl('div', { cls: 'actions-list' });
+        this.data!.maintenance.slice(0, 10).forEach(action => {
+            const item = list.createEl('div', { cls: `action-item priority-${action.priority}` });
+            item.dataset.noteId = action.noteId;
+            const header = item.createEl('div', { cls: 'action-header' });
+            header.createEl('span', { cls: 'action-title', text: action.title });
+            header.createEl('span', { cls: `action-priority priority-${action.priority}`, text: action.priority.toUpperCase() });
+            item.createEl('div', { cls: 'action-reason', text: action.reason });
+            item.createEl('div', { cls: 'action-content', text: action.action });
+            const buttons = item.createEl('div', { cls: 'action-buttons' });
+            buttons.createEl('button', { cls: 'action-btn primary', text: '📝 Open Note' });
+            buttons.createEl('button', { cls: 'action-btn secondary', text: '✓ Mark Done' });
+        });
+        if (this.data!.maintenance.length > 10) {
+            const showMore = section.createEl('div', { cls: 'show-more' });
+            showMore.createEl('button', { cls: 'show-more-btn', text: `Show ${this.data!.maintenance.length - 10} More Actions` });
+        }
         this.attachMaintenanceHandlers(section);
     }
 
     private createConnectionsSection(container: HTMLElement): void {
         const section = container.createEl('div', { cls: 'actions-section connections-section' });
-        
-        section.innerHTML = `
-            <h4>🔗 Connection Opportunities</h4>
-            <p class="section-description">Suggested links between your notes</p>
-            <div class="connections-list">
-                ${this.data!.connections.slice(0, 8).map(connection => `
-                    <div class="connection-item" data-source="${connection.sourceId}" data-target="${connection.targetId}">
-                        <div class="connection-header">
-                            <div class="connection-flow">
-                                <span class="source-note">${NoteResolver.resolveToTitle(this.app, connection.sourceId)}</span>
-                                <span class="connection-arrow">→</span>
-                                <span class="target-note">${NoteResolver.resolveToTitle(this.app, connection.targetId)}</span>
-                            </div>
-                            <span class="confidence-score">
-                                ${Math.round(connection.confidence * 100)}% confidence
-                            </span>
-                        </div>
-                        <div class="connection-reason">${connection.reason}</div>
-                        <div class="connection-buttons">
-                            <button class="action-btn primary" onclick="this.closest('.connection-item').createLink()">
-                                🔗 Create Link
-                            </button>
-                            <button class="action-btn secondary" onclick="this.closest('.connection-item').previewConnection()">
-                                👁️ Preview
-                            </button>
-                            <button class="action-btn tertiary" onclick="this.closest('.connection-item').dismissConnection()">
-                                ✗ Dismiss
-                            </button>
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-        `;
-
+        section.createEl('h4', { text: '🔗 Connection Opportunities' });
+        section.createEl('p', { cls: 'section-description', text: 'Suggested links between your notes' });
+        const list = section.createEl('div', { cls: 'connections-list' });
+        this.data!.connections.slice(0, 8).forEach(connection => {
+            const item = list.createEl('div', { cls: 'connection-item' });
+            item.dataset.source = connection.sourceId;
+            item.dataset.target = connection.targetId;
+            const header = item.createEl('div', { cls: 'connection-header' });
+            const flow = header.createEl('div', { cls: 'connection-flow' });
+            flow.createEl('span', { cls: 'source-note', text: NoteResolver.resolveToTitle(this.app, connection.sourceId) });
+            flow.createEl('span', { cls: 'connection-arrow', text: '→' });
+            flow.createEl('span', { cls: 'target-note', text: NoteResolver.resolveToTitle(this.app, connection.targetId) });
+            header.createEl('span', { cls: 'confidence-score', text: `${Math.round(connection.confidence * 100)}% confidence` });
+            item.createEl('div', { cls: 'connection-reason', text: connection.reason });
+            const buttons = item.createEl('div', { cls: 'connection-buttons' });
+            buttons.createEl('button', { cls: 'action-btn primary', text: '🔗 Create Link' });
+            buttons.createEl('button', { cls: 'action-btn secondary', text: '👁️ Preview' });
+            buttons.createEl('button', { cls: 'action-btn tertiary', text: '✗ Dismiss' });
+        });
         this.attachConnectionHandlers(section);
     }
 
     private createLearningPathsSection(container: HTMLElement): void {
         const section = container.createEl('div', { cls: 'actions-section learning-paths-section' });
-        
-        section.innerHTML = `
-            <h4>🗺️ Learning Paths</h4>
-            <p class="section-description">Recommended sequences for learning and exploration</p>
-            <div class="learning-paths-list">
-                ${this.data!.learningPaths.map(path => `
-                    <div class="learning-path-item">
-                        <div class="path-header">
-                            <h5 class="path-title">${path.title}</h5>
-                            <span class="path-length">${path.noteIds.length} notes</span>
-                        </div>
-                        <div class="path-description">${path.description}</div>
-                        <div class="path-rationale">${path.rationale}</div>
-                        <div class="path-sequence">
-                            ${path.noteIds.map((noteId, index) => `
-                                <div class="path-step">
-                                    <span class="step-number">${index + 1}</span>
-                                    <span class="step-note">${NoteResolver.resolveToTitle(this.app, noteId)}</span>
-                                </div>
-                            `).join('')}
-                        </div>
-                        <div class="path-buttons">
-                            <button class="action-btn primary" onclick="this.closest('.learning-path-item').startLearningPath()">
-                                🚀 Start Path
-                            </button>
-                            <button class="action-btn secondary" onclick="this.closest('.learning-path-item').bookmarkPath()">
-                                📌 Bookmark
-                            </button>
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-        `;
-
+        section.createEl('h4', { text: '🗺️ Learning Paths' });
+        section.createEl('p', { cls: 'section-description', text: 'Recommended sequences for learning and exploration' });
+        const list = section.createEl('div', { cls: 'learning-paths-list' });
+        this.data!.learningPaths.forEach(path => {
+            const item = list.createEl('div', { cls: 'learning-path-item' });
+            const header = item.createEl('div', { cls: 'path-header' });
+            header.createEl('h5', { cls: 'path-title', text: path.title });
+            header.createEl('span', { cls: 'path-length', text: `${path.noteIds.length} notes` });
+            item.createEl('div', { cls: 'path-description', text: path.description });
+            item.createEl('div', { cls: 'path-rationale', text: path.rationale });
+            const sequence = item.createEl('div', { cls: 'path-sequence' });
+            path.noteIds.forEach((noteId, index) => {
+                const step = sequence.createEl('div', { cls: 'path-step' });
+                step.createEl('span', { cls: 'step-number', text: String(index + 1) });
+                step.createEl('span', { cls: 'step-note', text: NoteResolver.resolveToTitle(this.app, noteId) });
+            });
+            const buttons = item.createEl('div', { cls: 'path-buttons' });
+            buttons.createEl('button', { cls: 'action-btn primary', text: '🚀 Start Path' });
+            buttons.createEl('button', { cls: 'action-btn secondary', text: '📌 Bookmark' });
+        });
         this.attachLearningPathHandlers(section);
     }
 
     private createOrganizationSection(container: HTMLElement): void {
         const section = container.createEl('div', { cls: 'actions-section organization-section' });
-        
-        // Group suggestions by type
         const groupedSuggestions = this.groupOrganizationSuggestions();
-        
-        section.innerHTML = `
-            <h4>📁 Organization Suggestions</h4>
-            <p class="section-description">Improvements for your knowledge structure</p>
-            <div class="organization-tabs">
-                <div class="tab-headers">
-                    <button class="org-tab-header active" data-type="tag">🏷️ Tags</button>
-                    <button class="org-tab-header" data-type="folder">📁 Folders</button>
-                    <button class="org-tab-header" data-type="structure">🏗️ Structure</button>
-                </div>
-                <div class="tab-content">
-                    ${this.renderOrganizationTab('tag', groupedSuggestions.tag)}
-                </div>
-            </div>
-        `;
-
+        section.createEl('h4', { text: '📁 Organization Suggestions' });
+        section.createEl('p', { cls: 'section-description', text: 'Improvements for your knowledge structure' });
+        const tabs = section.createEl('div', { cls: 'organization-tabs' });
+        const headers = tabs.createEl('div', { cls: 'tab-headers' });
+        ['tag', 'folder', 'structure'].forEach((type, i) => {
+            const labels: Record<string, string> = { tag: '🏷️ Tags', folder: '📁 Folders', structure: '🏗️ Structure' };
+            const btn = headers.createEl('button', { cls: `org-tab-header ${i === 0 ? 'active' : ''}`, text: labels[type] });
+            btn.dataset.type = type;
+        });
+        const tabContent = tabs.createEl('div', { cls: 'tab-content' });
+        this.renderOrganizationTabInto(tabContent, 'tag', groupedSuggestions.tag);
         this.attachOrganizationHandlers(section, groupedSuggestions);
     }
 
-    private renderOrganizationTab(type: string, suggestions: OrganizationSuggestion[]): string {
-        const icons = { tag: '🏷️', folder: '📁', structure: '🏗️' };
-        
-        return `
-            <div class="organization-suggestions" data-type="${type}">
-                ${suggestions.map(suggestion => `
-                    <div class="organization-item">
-                        <div class="suggestion-header">
-                            <span class="suggestion-icon">${icons[type as keyof typeof icons]}</span>
-                            <span class="suggestion-text">${suggestion.suggestion}</span>
-                        </div>
-                        <div class="affected-notes">
-                            <span class="affected-count">${suggestion.affectedNotes.length} notes affected</span>
-                            <div class="affected-list">
-                                ${suggestion.affectedNotes.slice(0, 3).map(noteId => 
-                                    `<span class="affected-note">${NoteResolver.resolveToTitle(this.app, noteId)}</span>`
-                                ).join('')}
-                                ${suggestion.affectedNotes.length > 3 ? `<span class="more-notes">+${suggestion.affectedNotes.length - 3} more</span>` : ''}
-                            </div>
-                        </div>
-                        <div class="suggestion-buttons">
-                            <button class="action-btn primary" onclick="this.closest('.organization-item').applySuggestion()">
-                                ✓ Apply
-                            </button>
-                            <button class="action-btn secondary" onclick="this.closest('.organization-item').previewSuggestion()">
-                                👁️ Preview
-                            </button>
-                            <button class="action-btn tertiary" onclick="this.closest('.organization-item').dismissSuggestion()">
-                                ✗ Dismiss
-                            </button>
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-        `;
+    private renderOrganizationTabInto(container: HTMLElement, type: string, suggestions: OrganizationSuggestion[]): void {
+        container.empty();
+        const icons: Record<string, string> = { tag: '🏷️', folder: '📁', structure: '🏗️' };
+        const suggestionsEl = container.createEl('div', { cls: 'organization-suggestions' });
+        suggestionsEl.dataset.type = type;
+        suggestions.forEach(suggestion => {
+            const item = suggestionsEl.createEl('div', { cls: 'organization-item' });
+            const header = item.createEl('div', { cls: 'suggestion-header' });
+            header.createEl('span', { cls: 'suggestion-icon', text: icons[type] || '📁' });
+            header.createEl('span', { cls: 'suggestion-text', text: suggestion.suggestion });
+            const affected = item.createEl('div', { cls: 'affected-notes' });
+            affected.createEl('span', { cls: 'affected-count', text: `${suggestion.affectedNotes.length} notes affected` });
+            const list = affected.createEl('div', { cls: 'affected-list' });
+            suggestion.affectedNotes.slice(0, 3).forEach(noteId => {
+                list.createEl('span', { cls: 'affected-note', text: NoteResolver.resolveToTitle(this.app, noteId) });
+            });
+            if (suggestion.affectedNotes.length > 3) {
+                list.createEl('span', { cls: 'more-notes', text: `+${suggestion.affectedNotes.length - 3} more` });
+            }
+            const buttons = item.createEl('div', { cls: 'suggestion-buttons' });
+            buttons.createEl('button', { cls: 'action-btn primary', text: '✓ Apply' });
+            buttons.createEl('button', { cls: 'action-btn secondary', text: '👁️ Preview' });
+            buttons.createEl('button', { cls: 'action-btn tertiary', text: '✗ Dismiss' });
+        });
     }
 
     // Helper methods
@@ -469,9 +383,9 @@ export class KnowledgeActionsManager {
                     target.addClass('active');
                     
                     // Update content
-                    const tabContent = section.querySelector('.tab-content');
+                    const tabContent = section.querySelector('.tab-content') as HTMLElement;
                     if (tabContent) {
-                        tabContent.innerHTML = this.renderOrganizationTab(type, groupedSuggestions[type]);
+                        this.renderOrganizationTabInto(tabContent, type, groupedSuggestions[type]);
                     }
                 }
             }
@@ -714,8 +628,6 @@ export class KnowledgeActionsManager {
                     continue;
                 }
 
-                const content = await app.vault.read(file);
-
                 // Build link lines using NoteResolver for consistent title resolution
                 const linkLines = conns.map((c) => {
                     const targetName = NoteResolver.resolveToTitle(app, c.targetId);
@@ -723,28 +635,20 @@ export class KnowledgeActionsManager {
                 });
 
                 const newSection = `\n\n## Related Notes\n${linkLines.join('\n')}\n`;
-                
-                // Check if there's already a "Related Notes" section
-                const relatedNotesRegex = /\n## Related Notes\n/;
-                let newContent: string;
-                if (relatedNotesRegex.test(content)) {
-                    // Append links to existing section (before the next ## heading or end of file)
-                    const insertPos = content.search(/\n## Related Notes\n/);
-                    const afterSection = content.indexOf('\n## ', insertPos + 1);
-                    if (afterSection > insertPos + 20) {
-                        // Insert before the next heading
-                        const existingSection = content.slice(insertPos, afterSection);
-                        newContent = content.slice(0, insertPos) + existingSection + linkLines.join('\n') + '\n' + content.slice(afterSection);
-                    } else {
-                        // Append at end
-                        newContent = content + '\n' + linkLines.join('\n') + '\n';
-                    }
-                } else {
-                    // Append new section at end of file
-                    newContent = content + newSection;
-                }
 
-                await app.vault.modify(file, newContent);
+                await app.vault.process(file, (content) => {
+                    const relatedNotesRegex = /\n## Related Notes\n/;
+                    if (relatedNotesRegex.test(content)) {
+                        const insertPos = content.search(/\n## Related Notes\n/);
+                        const afterSection = content.indexOf('\n## ', insertPos + 1);
+                        if (afterSection > insertPos + 20) {
+                            const existingSection = content.slice(insertPos, afterSection);
+                            return content.slice(0, insertPos) + existingSection + linkLines.join('\n') + '\n' + content.slice(afterSection);
+                        }
+                        return content + '\n' + linkLines.join('\n') + '\n';
+                    }
+                    return content + newSection;
+                });
                 written += conns.length;
             } catch (error) {
                 // console.error(`Failed to write connections to ${sourceId}:`, error);

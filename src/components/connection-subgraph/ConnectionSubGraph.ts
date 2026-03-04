@@ -57,6 +57,7 @@ export class ConnectionSubGraph {
     private width: number;
     private height: number;
     private markerId: string = '';
+    private static readonly GRAPH_SCALE = 0.8;
 
     constructor(
         app: App,
@@ -164,17 +165,20 @@ export class ConnectionSubGraph {
 
         this.svgGroup = this.svg.append('g');
 
-        // Zoom and pan - constrain pan so graph stays findable (viewport must overlap content area)
+        // Pan only (no zoom) - constrain pan so graph stays within container
+        const pad = 0.5; // Allow pan margin relative to content size
+        const scale = ConnectionSubGraph.GRAPH_SCALE;
         this.zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
-            .scaleExtent([0.3, 4])
+            .scaleExtent([scale, scale]) // Lock scale - disable zoom, keep pan
             .translateExtent([
-                [-this.width * 1.5, -this.height * 1.5],
-                [this.width / 2, this.height / 2]
+                [-this.width * (0.5 + pad), -this.height * (0.5 + pad)],
+                [this.width * (0.5 + pad), this.height * (0.5 + pad)]
             ])
             .on('zoom', (event) => {
                 this.svgGroup.attr('transform', event.transform);
             });
         this.svg.call(this.zoomBehavior);
+        this.svg.call(this.zoomBehavior.transform, d3.zoomIdentity.scale(scale));
 
         // Reset view - icon only, no button chrome (div avoids default button styling)
         const resetBtn = svgWrapper.createEl('div', { cls: 'subgraph-reset-view-btn' });
@@ -416,7 +420,7 @@ export class ConnectionSubGraph {
     private resetView(): void {
         this.svg.transition()
             .duration(300)
-            .call(this.zoomBehavior.transform, d3.zoomIdentity);
+            .call(this.zoomBehavior.transform, d3.zoomIdentity.scale(ConnectionSubGraph.GRAPH_SCALE));
     }
 
     // ─────────────────── Add to Graph Button ───────────────────

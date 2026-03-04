@@ -255,17 +255,17 @@ export class CentralityKDEChart {
         tooltip.style.whiteSpace = 'nowrap';
 
         const centralityName = centralityType.charAt(0).toUpperCase() + centralityType.slice(1);
-        tooltip.innerHTML = `
-            <div style="font-weight: var(--font-medium); margin-bottom: 4px; color: var(--text-normal);">
-                ${centralityName} Centrality
-            </div>
-            <div style="color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: 2px;">
-                Range: ${range}
-            </div>
-            <div style="color: var(--text-muted); font-size: var(--font-ui-smaller);">
-                Count: ${count} note${count !== 1 ? 's' : ''}
-            </div>
-        `;
+        const titleEl = tooltip.createEl('div', { text: `${centralityName} Centrality` });
+        titleEl.style.fontWeight = 'var(--font-medium)';
+        titleEl.style.marginBottom = '4px';
+        titleEl.style.color = 'var(--text-normal)';
+        const rangeEl = tooltip.createEl('div', { text: `Range: ${range}` });
+        rangeEl.style.color = 'var(--text-muted)';
+        rangeEl.style.fontSize = 'var(--font-ui-smaller)';
+        rangeEl.style.marginBottom = '2px';
+        const countEl = tooltip.createEl('div', { text: `Count: ${count} note${count !== 1 ? 's' : ''}` });
+        countEl.style.color = 'var(--text-muted)';
+        countEl.style.fontSize = 'var(--font-ui-smaller)';
 
         document.body.appendChild(tooltip);
         this.tooltip = tooltip;

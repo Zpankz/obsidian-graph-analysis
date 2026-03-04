@@ -2545,6 +2545,20 @@ button.is-disabled {
   font-weight: var(--font-semibold);
 }
 
+/* Reduce markdown list indentation - each container has a single bullet */
+.ai-bullet-item-container ul {
+  padding-left: 1em;
+  margin: 0;
+  list-style-position: outside;
+}
+.ai-bullet-item-container li {
+  margin: 0;
+}
+.ai-bullet-item-container li p {
+  margin: 0;
+  display: inline;
+}
+
 
 /* Loading state for AI insights */
 .ai-insights-loading {

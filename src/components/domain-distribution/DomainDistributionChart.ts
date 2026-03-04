@@ -169,15 +169,10 @@ export class DomainDistributionChart {
 
     private renderPlaceholder(): void {
         const placeholder = this.container.createEl('div', { cls: 'domain-chart-placeholder' });
-        placeholder.innerHTML = `
-            <div class="placeholder-content">
-                <div class="placeholder-icon">📊</div>
-                <div class="placeholder-title">No Domain Hierarchy Available</div>
-                <div class="placeholder-text">
-                    Please generate vault analysis with knowledge domain classification to see domain distribution.
-                </div>
-            </div>
-        `;
+        const content = placeholder.createEl('div', { cls: 'placeholder-content' });
+        content.createEl('div', { cls: 'placeholder-icon', text: '📊' });
+        content.createEl('div', { cls: 'placeholder-title', text: 'No Domain Hierarchy Available' });
+        content.createEl('div', { cls: 'placeholder-text', text: 'Please generate vault analysis with knowledge domain classification to see domain distribution.' });
     }
 
     private renderSunburstChart(container: HTMLElement = this.container): void {

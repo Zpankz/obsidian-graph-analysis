@@ -1,4 +1,4 @@
-import { App, Modal, setIcon, Notice, TFile } from 'obsidian';
+import { App, Modal, setIcon, Notice, TFile, MarkdownRenderer, Component } from 'obsidian';
 import { KnowledgeCalendarChart } from '../components/calendar-chart/KnowledgeCalendarChart';
 import { ConnectivityScatterChart } from '../components/scatter-chart/ConnectivityScatterChart';
 import { ConnectionSubGraph } from '../components/connection-subgraph/ConnectionSubGraph';
@@ -52,6 +52,16 @@ export class VaultAnalysisModal extends Modal {
     private resultsSection: HTMLElement | null = null;
     private resultsContainer: HTMLElement | null = null;
     private resultsWrapper: HTMLElement | null = null;
+
+    /** Get the plugin instance (a Component) for MarkdownRenderer lifecycle management */
+    private get markdownComponent(): Component {
+        const plugins = (this.app as { plugins?: { plugins?: Record<string, Component> } }).plugins?.plugins;
+        const plugin = plugins?.['knowledge-graph-analysis'];
+        if (!plugin || !(plugin instanceof Component)) {
+            throw new Error('Plugin not found or not a Component - cannot render markdown safely');
+        }
+        return plugin;
+    }
 
     constructor(
         app: App, 
@@ -884,7 +894,8 @@ export class VaultAnalysisModal extends Modal {
 
         if (this.vaultSemanticAnalysisManager.isAnalysisInProgress()) {
             statusIndicator.addClass('status-outdated');
-            statusIndicator.innerHTML = '<span class="status-dot"></span> Analysis in progress';
+            statusIndicator.createSpan({ cls: 'status-dot' });
+            statusIndicator.appendText(' Analysis in progress');
             const disabledButton = buttonContainer.createEl('button', {
                 cls: 'mod-cta is-disabled',
                 text: 'Analysis is processing...'
@@ -895,7 +906,8 @@ export class VaultAnalysisModal extends Modal {
 
         if (isChecking) {
             statusIndicator.addClass('status-outdated');
-            statusIndicator.innerHTML = '<span class="status-dot"></span> Checking for updates...';
+            statusIndicator.createSpan({ cls: 'status-dot' });
+            statusIndicator.appendText(' Checking for updates...');
             const disabledButton = buttonContainer.createEl('button', {
                 cls: 'mod-cta is-disabled',
                 text: 'Update Analysis'
@@ -906,10 +918,12 @@ export class VaultAnalysisModal extends Modal {
 
         if (!isOutdated) {
             statusIndicator.addClass('status-current');
-            statusIndicator.innerHTML = '<span class="status-dot"></span> Analysis is current';
+            statusIndicator.createSpan({ cls: 'status-dot' });
+            statusIndicator.appendText(' Analysis is current');
         } else {
             statusIndicator.addClass('status-outdated');
-            statusIndicator.innerHTML = '<span class="status-dot"></span> Analysis needs update';
+            statusIndicator.createSpan({ cls: 'status-dot' });
+            statusIndicator.appendText(' Analysis needs update');
         }
 
         const updateButton = buttonContainer.createEl('button', {
@@ -1012,7 +1026,8 @@ export class VaultAnalysisModal extends Modal {
 
         if (this.vaultSemanticAnalysisManager.isAnalysisInProgress()) {
             statusIndicator.addClass('status-outdated');
-            statusIndicator.innerHTML = '<span class="status-dot"></span> Analysis in progress';
+            statusIndicator.createSpan({ cls: 'status-dot' });
+            statusIndicator.appendText(' Analysis in progress');
             const disabledButton = buttonContainer.createEl('button', {
                 cls: 'mod-cta is-disabled',
                 text: 'Analysis is processing...'
@@ -1022,7 +1037,8 @@ export class VaultAnalysisModal extends Modal {
         }
 
         statusIndicator.addClass('status-empty');
-        statusIndicator.innerHTML = '<span class="status-dot"></span> Analysis not generated yet';
+        statusIndicator.createSpan({ cls: 'status-dot' });
+        statusIndicator.appendText(' Analysis not generated yet');
 
         const analysisButton = buttonContainer.createEl('button', {
             cls: 'mod-cta',
@@ -1085,12 +1101,19 @@ export class VaultAnalysisModal extends Modal {
         
         const loadingText = loadingContainer.createEl('p');
         const estTime = tabName ? '1–2 minutes' : '3–6 minutes';
-        loadingText.innerHTML = `
-            <strong style="color: var(--color-orange);">🧪 ${tabName ? `Generating ${this.getTabDisplayName(tabName)} Analysis` : 'Generating All Analyses'}</strong><br>
-            ${tabName ? `This includes ${this.getTabDescription(tabName)}.` : 'This includes knowledge structure, evolution, and recommendations.'}<br>
-            <strong>Estimated time:</strong> ${estTime}.<br>
-            <small style="color: var(--text-muted);">Results will be cached for future use.</small>
-        `;
+        const strongTitle = loadingText.createEl('strong');
+        strongTitle.style.color = 'var(--color-orange)';
+        strongTitle.setText(`🧪 ${tabName ? `Generating ${this.getTabDisplayName(tabName)} Analysis` : 'Generating All Analyses'}`);
+        loadingText.createEl('br');
+        loadingText.appendText(tabName ? `This includes ${this.getTabDescription(tabName)}.` : 'This includes knowledge structure, evolution, and recommendations.');
+        loadingText.createEl('br');
+        const timeStrong = loadingText.createEl('strong');
+        timeStrong.setText('Estimated time: ');
+        loadingText.appendText(`${estTime}.`);
+        loadingText.createEl('br');
+        const smallNote = loadingText.createEl('small');
+        smallNote.style.color = 'var(--text-muted)';
+        smallNote.setText('Results will be cached for future use.');
 
         try {
             // Knowledge domain template loading is handled automatically by KnowledgeDomainHelper
@@ -1275,7 +1298,7 @@ export class VaultAnalysisModal extends Modal {
             const conclusionText = conclusionSection.createEl('div', { 
                 cls: 'ai-conclusion-content'
             });
-            conclusionText.innerHTML = narrative.content.replace(/\n/g, '<br>');
+            MarkdownRenderer.render(this.app, narrative.content, conclusionText, '', this.markdownComponent);
         }
     }
 
@@ -1283,8 +1306,7 @@ export class VaultAnalysisModal extends Modal {
     private addTimelineVisualization(section: HTMLElement, phases: any[]): void {
         phases.forEach(phase => {
             const phaseEl = section.createEl('div', { cls: 'ai-bullet-item-container' });
-            // Format as markdown-style list item
-            phaseEl.innerHTML = `- <strong>${phase.period}</strong>: ${phase.description}`;
+            MarkdownRenderer.render(this.app, `- **${phase.period}**: ${phase.description}`, phaseEl, '', this.markdownComponent);
         });
     }
 
@@ -1299,8 +1321,7 @@ export class VaultAnalysisModal extends Modal {
                     return domainParts[1] || domain;
                 });
                 
-                // Format as markdown-style list item
-                itemEl.innerHTML = `- <strong>${item.period}</strong>: ${cleanDomains.join(', ')}`;
+                MarkdownRenderer.render(this.app, `- **${item.period}**: ${cleanDomains.join(', ')}`, itemEl, '', this.markdownComponent);
             }
         });
     }
@@ -1308,8 +1329,7 @@ export class VaultAnalysisModal extends Modal {
     private addFocusShiftVisualization(section: HTMLElement, shifts: any[]): void {
         shifts.forEach(shift => {
             const shiftEl = section.createEl('div', { cls: 'ai-bullet-item-container' });
-            // Format as markdown-style list item
-            shiftEl.innerHTML = `- <strong>${shift.period}</strong>: ${shift.newAreas.length} new areas, ${shift.decreasedFocus.length} reduced`;
+            MarkdownRenderer.render(this.app, `- **${shift.period}**: ${shift.newAreas.length} new areas, ${shift.decreasedFocus.length} reduced`, shiftEl, '', this.markdownComponent);
         });
     }
 
@@ -1642,7 +1662,8 @@ export class VaultAnalysisModal extends Modal {
 
         if (this.vaultSemanticAnalysisManager.isAnalysisInProgress()) {
             statusIndicator.addClass('status-outdated');
-            statusIndicator.innerHTML = '<span class="status-dot"></span> Analysis in progress';
+            statusIndicator.createSpan({ cls: 'status-dot' });
+            statusIndicator.appendText(' Analysis in progress');
             const disabledButton = buttonContainer.createEl('button', {
                 cls: 'mod-cta is-disabled',
                 text: 'Analysis is processing...'
@@ -1652,7 +1673,8 @@ export class VaultAnalysisModal extends Modal {
         }
 
         statusIndicator.addClass('status-empty');
-        statusIndicator.innerHTML = '<span class="status-dot"></span> Analysis not generated yet';
+        statusIndicator.createSpan({ cls: 'status-dot' });
+        statusIndicator.appendText(' Analysis not generated yet');
 
         const generateButton = buttonContainer.createEl('button', {
             cls: 'mod-cta',

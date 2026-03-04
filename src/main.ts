@@ -26,7 +26,6 @@ export default class GraphAnalysisPlugin extends Plugin {
     settings!: GraphAnalysisSettings;
     wasmInitialized: boolean = false;
     graphView: GraphView | null = null;
-    centralityView: CentralityResultsView | null = null;
     aiSummaryManager: AISummaryManager | null = null;
     vaultAnalysisManager: VaultSemanticAnalysisManager | null = null;
     exclusionUtils: ExclusionUtils | null = null;
@@ -59,10 +58,7 @@ export default class GraphAnalysisPlugin extends Plugin {
         // Register the centrality results view
         this.registerView(
             CENTRALITY_RESULTS_VIEW_TYPE,
-            (leaf: WorkspaceLeaf) => {
-                this.centralityView = new CentralityResultsView(leaf);
-                return this.centralityView;
-            }
+            (leaf: WorkspaceLeaf) => new CentralityResultsView(leaf)
         );
 
         // // Add command for degree centrality
@@ -306,11 +302,6 @@ export default class GraphAnalysisPlugin extends Plugin {
         
         this.wasmInitialized = false;
         this.wasmLoadingPromise = null;
-        
-        const leaves = this.app.workspace.getLeavesOfType(GRAPH_ANALYSIS_VIEW_TYPE);
-        for (const leaf of leaves) {
-            leaf.detach();
-        }
         
         // Ensure status bar is restored when plugin is unloaded
         document.body.removeClass('graph-analysis-hide-status-bar');
@@ -640,9 +631,10 @@ export default class GraphAnalysisPlugin extends Plugin {
             this.app.workspace.revealLeaf(leaf);
         }
 
-        // Update the view with new results
-        if (this.centralityView) {
-            await this.centralityView.setResults(results, algorithmName);
+        // Update the view with new results (resolve from leaf instead of storing reference)
+        const view = leaf?.view instanceof CentralityResultsView ? leaf.view : null;
+        if (view) {
+            await view.setResults(results, algorithmName);
         }
     }
 

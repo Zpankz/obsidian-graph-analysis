@@ -1,4 +1,4 @@
-import { App, Notice, Modal, setIcon } from 'obsidian';
+import { App, Notice, Modal, setIcon, MarkdownRenderer, MarkdownView, Component } from 'obsidian';
 import { GraphAnalysisSettings } from '../types/types';
 import { AIModelService, SEMANTIC_MODELS, SemanticAnalysisError } from '../services/AIModelService';
 import { cleanupNoteContent } from '../utils/NoteContentUtils';
@@ -226,6 +226,15 @@ class AISummaryModal extends Modal {
     private writeSummary: string;
     private fileName: string;
 
+    private get markdownComponent(): Component {
+        const plugins = (this.app as { plugins?: { plugins?: Record<string, Component> } }).plugins?.plugins;
+        const plugin = plugins?.['knowledge-graph-analysis'];
+        if (!plugin || !(plugin instanceof Component)) {
+            throw new Error('Plugin not found - cannot render markdown safely');
+        }
+        return plugin;
+    }
+
     constructor(app: App, displaySummary: string, writeSummary: string, fileName: string) {
         super(app);
         this.displaySummary = displaySummary;
@@ -242,26 +251,47 @@ class AISummaryModal extends Modal {
 
         try {
             const content = await this.app.vault.read(activeFile);
-            let newContent: string;
+            const insertText = '\n\n' + this.writeSummary + '\n\n';
+            let insertPos: { line: number; ch: number };
 
             // Check if the file has frontmatter
             if (content.startsWith('---')) {
                 const frontmatterEnd = content.indexOf('---', 3);
                 if (frontmatterEnd !== -1) {
-                    // Insert after frontmatter
-                    newContent = content.slice(0, frontmatterEnd + 3) + '\n\n' + 
-                               this.writeSummary + '\n\n' +
-                               content.slice(frontmatterEnd + 3);
+                    // Insert after frontmatter - convert char index to line/ch
+                    const beforeInsert = content.slice(0, frontmatterEnd + 3);
+                    const line = (beforeInsert.match(/\n/g) || []).length;
+                    const lastNewline = beforeInsert.lastIndexOf('\n');
+                    const ch = lastNewline === -1 ? beforeInsert.length : beforeInsert.length - lastNewline - 1;
+                    insertPos = { line, ch };
                 } else {
-                    // Invalid frontmatter, insert at beginning
-                    newContent = this.writeSummary + '\n\n' + content;
+                    insertPos = { line: 0, ch: 0 };
                 }
             } else {
-                // No frontmatter, insert at beginning
-                newContent = this.writeSummary + '\n\n' + content;
+                insertPos = { line: 0, ch: 0 };
             }
 
-            await this.app.vault.modify(activeFile, newContent);
+            // Prefer Editor API when file is open in editor
+            const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+            if (markdownView?.file === activeFile && markdownView.editor) {
+                const editor = markdownView.editor;
+                editor.replaceRange(insertText, insertPos);
+            } else {
+                // Fallback to vault.modify when file is not open in editor
+                let newContent: string;
+                if (content.startsWith('---')) {
+                    const frontmatterEnd = content.indexOf('---', 3);
+                    if (frontmatterEnd !== -1) {
+                        newContent = content.slice(0, frontmatterEnd + 3) + insertText + content.slice(frontmatterEnd + 3);
+                    } else {
+                        newContent = this.writeSummary + '\n\n' + content;
+                    }
+                } else {
+                    newContent = this.writeSummary + '\n\n' + content;
+                }
+                await this.app.vault.modify(activeFile, newContent);
+            }
+
             new Notice('Summary added to note');
             this.close();
         } catch (error) {
@@ -299,8 +329,7 @@ class AISummaryModal extends Modal {
                 });
             } else {
                 const p = summaryContainer.createEl('p', { cls: 'ai-summary-text' });
-                p.innerHTML = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                                 .replace(/\*(.*?)\*/g, '<em>$1</em>');
+                MarkdownRenderer.render(this.app, line, p, '', this.markdownComponent);
             }
         });
         

@@ -389,8 +389,8 @@ export class ConnectivityScatterChart {
     private showTooltip(event: MouseEvent, data: ScatterDataPoint): void {
         this.hideTooltip();
 
-        const tooltip = document.createElement('div');
-        tooltip.className = 'scatter-tooltip';
+        const tooltip = this.container.createEl('div', { cls: 'scatter-tooltip' });
+        tooltip.remove(); // Detach from container so we can append to body for positioning
         tooltip.style.position = 'absolute';
         tooltip.style.background = 'var(--background-primary)';
         tooltip.style.border = '1px solid var(--background-modifier-border)';
@@ -403,14 +403,15 @@ export class ConnectivityScatterChart {
         tooltip.style.pointerEvents = 'none';
         tooltip.style.whiteSpace = 'nowrap';
         tooltip.style.maxWidth = '300px';
+        document.body.appendChild(tooltip);
+
+        const titleEl = tooltip.createEl('div', { text: data.title });
+        titleEl.style.fontWeight = 'var(--font-medium)';
+        titleEl.style.marginBottom = '4px';
+        titleEl.style.color = 'var(--text-normal)';
 
         const isCentralityMode = this.currentMode === 'centrality';
-        let content = `
-            <div style="font-weight: var(--font-medium); margin-bottom: 4px; color: var(--text-normal);">
-                ${data.title}
-            </div>
-        `;
-
+        const mutedStyle = 'color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: 2px;';
         if (isCentralityMode) {
             const betweenness = data.betweennessCentrality ?? 0;
             const eigenvector = data.eigenvectorCentrality ?? 0;
@@ -418,30 +419,19 @@ export class ConnectivityScatterChart {
                 if (val < 0.01 && val > 0) return val.toExponential(3);
                 return val.toFixed(4);
             };
-            content += `
-                <div style="color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: 2px;">
-                    Betweenness: ${formatValue(betweenness)}
-                </div>
-                <div style="color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: 2px;">
-                    Eigenvector: ${formatValue(eigenvector)}
-                </div>
-            `;
+            const bEl = tooltip.createEl('div', { text: `Betweenness: ${formatValue(betweenness)}` });
+            bEl.setAttribute('style', mutedStyle);
+            const eEl = tooltip.createEl('div', { text: `Eigenvector: ${formatValue(eigenvector)}` });
+            eEl.setAttribute('style', mutedStyle);
         } else {
             const outbound = data.outboundLinks ?? 0;
             const inbound = data.inboundLinks ?? 0;
-            content += `
-                <div style="color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: 2px;">
-                    Outbound: ${outbound} link${outbound !== 1 ? 's' : ''}
-                </div>
-                <div style="color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: 2px;">
-                    Inbound: ${inbound} link${inbound !== 1 ? 's' : ''}
-                </div>
-            `;
+            const outEl = tooltip.createEl('div', { text: `Outbound: ${outbound} link${outbound !== 1 ? 's' : ''}` });
+            outEl.setAttribute('style', mutedStyle);
+            const inEl = tooltip.createEl('div', { text: `Inbound: ${inbound} link${inbound !== 1 ? 's' : ''}` });
+            inEl.setAttribute('style', mutedStyle);
         }
 
-        tooltip.innerHTML = content;
-
-        document.body.appendChild(tooltip);
         this.tooltip = tooltip;
         this.updateTooltipPosition(event);
     }
