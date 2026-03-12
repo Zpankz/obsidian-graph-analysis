@@ -26,8 +26,9 @@ export interface AIResponse<T = string> {
 export type { SemanticErrorType };
 export { SemanticAnalysisError };
 
-/** Semantic models for vault analysis and AI summary (dual-model for 40 RPD on free tier) */
-export const SEMANTIC_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'] as const;
+// export const SEMANTIC_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'] as const;
+/** Semantic models for vault analysis and AI summary (gemini-3.1-flash-lite has 250K RPD) */
+// export const SEMANTIC_MODELS = ['gemini-3.1-flash-lite-preview'] as const;
 
 export class AIModelService {
     private app: { workspace: { containerEl: HTMLElement } };
@@ -40,7 +41,7 @@ export class AIModelService {
     // Gemini 3 Flash: RPM 5 -> 12s between requests
     private readonly ADVANCED_RATE_LIMIT_DELAY = 12000;
     private readonly MODEL_NAME = 'gemini-3-flash-preview';
-    private readonly SEMANTIC_MODEL_NAME = SEMANTIC_MODELS[1]; // Default when no modelOverride
+    private readonly SEMANTIC_MODEL_NAME = 'gemini-3.1-flash-lite-preview'; // Default when no modelOverride
     
     public getModelName(): string {
         return this.MODEL_NAME;
@@ -197,7 +198,7 @@ export class AIModelService {
     /**
      * Semantic analysis using Gemini 2.5 Flash Lite for vault batch and AI summary.
      * Uses native structured output (responseMimeType + responseSchema).
-     * @param modelOverride When set, use this model instead of SEMANTIC_MODEL_NAME (for dual-model rate limit)
+     * @param modelOverride When set, use this model instead of SEMANTIC_MODEL_NAME
      */
     public async generateSemanticAnalysis<T>(
         prompt: string,

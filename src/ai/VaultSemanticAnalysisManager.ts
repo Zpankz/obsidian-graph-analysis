@@ -6,7 +6,7 @@ import {
     VaultAnalysisData,
     MasterAnalysisManager
 } from './MasterAnalysisManager';
-import { AIModelService, SEMANTIC_MODELS, SemanticAnalysisError } from '../services/AIModelService';
+import { AIModelService, SemanticAnalysisError } from '../services/AIModelService';
 import { getUserFriendlyMessage } from '../utils/GeminiErrorUtils';
 import { GraphDataBuilder } from '../components/graph-view/data/graph-builder';
 import { PluginService } from '../services/PluginService';
@@ -76,9 +76,6 @@ export class VaultSemanticAnalysisManager {
         return `${this.app.vault.configDir}/plugins/knowledge-graph-analysis/responses/vault-analysis-failed-batches.json`;
     }
 
-    private getSemanticModelForBatch(batchIndex: number): string {
-        return SEMANTIC_MODELS[batchIndex % 2];
-    }
 
     /**
      * Ensure responses directory exists (cached per session)
@@ -693,8 +690,7 @@ export class VaultSemanticAnalysisManager {
                 const batch = batches[batchIndex];
                 const batchFileCount = batch.length;
                 const batchCharCount = batch.reduce((sum, f) => sum + f.charCount, 0);
-                const primaryModel = this.getSemanticModelForBatch(batchIndex);
-                const alternateModel = SEMANTIC_MODELS[(batchIndex + 1) % 2];
+                const modelName = this.aiService.getSemanticModelName();
 
                 // Update progress with batch info
                 const totalToProcess = filesToProcess.length;
@@ -708,11 +704,10 @@ export class VaultSemanticAnalysisManager {
                 try {
                     batchResult = await this.analyzeBatch(batch, batchIndex);
                 } catch (batchError) {
-                    const err = batchError instanceof SemanticAnalysisError ? batchError : new SemanticAnalysisError((batchError as Error).message, 'other', primaryModel);
+                    const err = batchError instanceof SemanticAnalysisError ? batchError : new SemanticAnalysisError((batchError as Error).message, 'other', modelName);
 
                     if (err.errorType === 'quota_exhausted') {
-                        // console.warn(`Daily API quota (20 RPD) exhausted at batch ${batchIndex + 1}. Stopping. Remaining notes saved for retry tomorrow.`);
-                        await this.appendFailedBatch(batch, batchIndex, primaryModel, alternateModel, err.message);
+                        await this.appendFailedBatch(batch, batchIndex, modelName, err.message);
                         failed += batch.length;
                         processed += batch.length;
                         progressNotice.hide();
@@ -720,39 +715,20 @@ export class VaultSemanticAnalysisManager {
                         break;
                     }
 
-                    // console.error(`Error processing batch ${batchIndex + 1}:`, batchError);
-                    progressNotice.setMessage(`Retrying batch ${batchIndex + 1}/${totalBatches} with ${alternateModel}...`);
-                    await new Promise(resolve => this.win.setTimeout(resolve, 10000));
-                    try {
-                        batchResult = await this.analyzeBatch(batch, batchIndex, alternateModel);
-                    } catch (retryError) {
-                        const retryErr = retryError instanceof SemanticAnalysisError ? retryError : new SemanticAnalysisError((retryError as Error).message, 'other', alternateModel);
-                        // console.error(`Retry failed for batch ${batchIndex + 1}:`, retryError);
-
-                        if (retryErr.errorType === 'quota_exhausted') {
-                            await this.appendFailedBatch(batch, batchIndex, primaryModel, alternateModel, retryErr.message);
-                            failed += batch.length;
-                            processed += batch.length;
-                            progressNotice.hide();
-                            stoppedDueToQuota = true;
-                            break;
-                        }
-
-                        if (retryErr.errorType === 'rate_limit') {
-                            progressNotice.setMessage(`Rate limited, waiting 15s before retry...`);
-                            await new Promise(resolve => this.win.setTimeout(resolve, 15000));
-                            try {
-                                batchResult = await this.analyzeBatch(batch, batchIndex);
-                            } catch (thirdError) {
-                                await this.appendFailedBatch(batch, batchIndex, primaryModel, alternateModel, (thirdError as Error).message);
-                                failed += batch.length;
-                                processed += batch.length;
-                            }
-                        } else {
-                            await this.appendFailedBatch(batch, batchIndex, primaryModel, alternateModel, retryErr.message);
+                    if (err.errorType === 'rate_limit') {
+                        progressNotice.setMessage(`Rate limited, waiting 15s before retry...`);
+                        await new Promise(resolve => this.win.setTimeout(resolve, 15000));
+                        try {
+                            batchResult = await this.analyzeBatch(batch, batchIndex);
+                        } catch (retryError) {
+                            await this.appendFailedBatch(batch, batchIndex, modelName, (retryError as Error).message);
                             failed += batch.length;
                             processed += batch.length;
                         }
+                    } else {
+                        await this.appendFailedBatch(batch, batchIndex, modelName, err.message);
+                        failed += batch.length;
+                        processed += batch.length;
                     }
                 }
 
@@ -950,7 +926,7 @@ export class VaultSemanticAnalysisManager {
             // Process API files if any exist
             if (apiFiles.length > 0) {
                 try {
-                    const model = modelOverride ?? this.getSemanticModelForBatch(batchIndex);
+                    const model = modelOverride ?? this.aiService.getSemanticModelName();
                     const batchAnalysisResult = await this.generateStructuredBatchAnalysis(apiFiles, model);
                     batchTokenUsage = batchAnalysisResult.tokenUsage;
                     
@@ -1107,8 +1083,7 @@ export class VaultSemanticAnalysisManager {
     private async appendFailedBatch(
         batch: Array<{ file: TFile; charCount: number }>,
         batchIndex: number,
-        primaryModel: string,
-        retryModel: string,
+        modelName: string,
         error: string
     ): Promise<void> {
         await this.ensureResponsesDirectory();
@@ -1116,8 +1091,8 @@ export class VaultSemanticAnalysisManager {
         data.failed.push({
             timestamp: new Date().toISOString(),
             batchIndex,
-            primaryModel,
-            retryModel,
+            primaryModel: modelName,
+            retryModel: modelName,
             error,
             notes: batch.map(b => ({ path: b.file.path, basename: b.file.basename, charCount: b.charCount }))
         });
@@ -1516,8 +1491,8 @@ For each note, provide:
 2. **Keywords**: 3-6 key terms or phrases (comma-separated)
 3. **Knowledge Domain**: Knowledge domain subdivision codes that best match the content (comma-separated)
 
-## Language Rule
-Always respond in the same language as the note content. If a note is written in Chinese, the summary and keywords must be in Chinese. If in English, respond in English. Match each note's language independently.
+## Language Rule (Critical)
+Each batch contains multiple notes that may use different languages. For each note, the summary and keywords MUST use the same language as that note's content. A Chinese note gets a Chinese response; an English note gets an English response. Match each note's language independently—do not assume all notes in a batch share the same language.
 
 ## Notes to Analyze:`;
 

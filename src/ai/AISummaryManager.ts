@@ -1,6 +1,6 @@
 import { App, Notice, Modal, setIcon, MarkdownRenderer, MarkdownView, Component } from 'obsidian';
 import { GraphAnalysisSettings } from '../types/types';
-import { AIModelService, SEMANTIC_MODELS, SemanticAnalysisError } from '../services/AIModelService';
+import { AIModelService, SemanticAnalysisError } from '../services/AIModelService';
 import { cleanupNoteContent } from '../utils/NoteContentUtils';
 import { getUserFriendlyMessage } from '../utils/GeminiErrorUtils';
 
@@ -10,7 +10,6 @@ export class AISummaryManager {
     private aiService: AIModelService;
     private statusBarItem: HTMLElement | null = null;
     private readonly MAX_WORDS_PER_NOTE = 1000;
-    private semanticModelCounter = 0;
 
     constructor(app: App, settings: GraphAnalysisSettings) {
         this.app = app;
@@ -116,41 +115,16 @@ For the note, provide:
             // Build the complete prompt
             const fullPrompt = `${systemPrompt}\n\n${contextPrompt}\n\n${instructionPrompt}\n\n--- Note: "${fileName}" (${cleanedContent.split(/\s+/).length} words) ---\n${cleanedContent}`;
 
-            const modelOverride = SEMANTIC_MODELS[this.semanticModelCounter++ % 2];
-            let response;
-            try {
-                response = await this.aiService.generateSemanticAnalysis<{
-                    keyWords: string;
-                    keyPoints: string;
-                }>(
-                    fullPrompt,
-                    responseSchema,
-                    1200, // Appropriate token limit for single note
-                    0.2, // Low temperature for consistent results
-                    0.72, // Default topP
-                    modelOverride
-                );
-            } catch (firstError) {
-                if (firstError instanceof SemanticAnalysisError && firstError.errorType === 'quota_exhausted') {
-                    throw new Error('Free-tier daily limit reached. Retry tomorrow.');
-                }
-                if (firstError instanceof SemanticAnalysisError && firstError.errorType === 'rate_limit') {
-                    const alternateModel = SEMANTIC_MODELS[this.semanticModelCounter++ % 2];
-                    response = await this.aiService.generateSemanticAnalysis<{
-                        keyWords: string;
-                        keyPoints: string;
-                    }>(
-                        fullPrompt,
-                        responseSchema,
-                        1200,
-                        0.2,
-                        0.72,
-                        alternateModel
-                    );
-                } else {
-                    throw firstError;
-                }
-            }
+            const response = await this.aiService.generateSemanticAnalysis<{
+                keyWords: string;
+                keyPoints: string;
+            }>(
+                fullPrompt,
+                responseSchema,
+                1200, // Appropriate token limit for single note
+                0.2, // Low temperature for consistent results
+                0.72 // Default topP
+            );
 
             // Extract the result (single object, not array)
             const analysis = response.result;
