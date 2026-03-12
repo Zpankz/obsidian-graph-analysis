@@ -645,7 +645,7 @@ export class GraphView {
         // Add mouse enter/leave handlers for the tooltip itself
         tooltip.addEventListener('mouseenter', () => {
             if (this._hideTooltipTimeout) {
-                clearTimeout(this._hideTooltipTimeout);
+                this.win.clearTimeout(this._hideTooltipTimeout);
                 this._hideTooltipTimeout = null;
             }
         });
@@ -821,7 +821,7 @@ export class GraphView {
             return 0;
         }
         
-        const value = getComputedStyle(workspace)
+        const value = this.win.getComputedStyle(workspace)
             .getPropertyValue(`--graph-tooltip-${settingName}`)
             .trim();
         return parseInt(value) || 0;
@@ -1531,7 +1531,7 @@ export class GraphView {
         // Create a new IntersectionObserver
         this.visibilityObserver = new IntersectionObserver(
             (entries) => {
-                const now = performance.now();
+                const now = this.win.performance.now();
                 
                 // Check if the graph view became visible
                 const entry = entries[0];

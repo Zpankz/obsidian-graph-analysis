@@ -1054,6 +1054,7 @@ export class KnowledgeStructureManager {
      * Public method to render just the network analysis section
      */
     public async renderNetworkAnalysis(container: HTMLElement, data?: KnowledgeStructureData): Promise<void> {
+        this.container = container; // Required for ownerDocument in renderNetworkCards/createDomainCard
         // Set data if provided
         if (data) {
             this.data = data;
