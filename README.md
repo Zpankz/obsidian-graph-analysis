@@ -113,7 +113,7 @@ Under Obsidian settings → **Knowledge Graph Analysis**:
 
 - **TypeScript** for the Obsidian plugin interface and UI
 - **Rust → WebAssembly**: Graph algorithms (degree, betweenness, closeness, eigenvector centrality, force-directed layout) run in Rust compiled to WASM via [rustworkx](https://github.com/rustworkx/rustworkx), delivering native-speed computation in the browser
-- **Google Gemini Flash Lite**: Structured JSON output with temperature 0.3 — cost-efficient on the free tier, sufficient for summaries, keywords, and domain extraction
+- **Google Gemini 3.1 Flash Lite**: Structured JSON output with temperature 0.3 — 250K TPM, 500 requests/day on the free tier, sufficient for summaries, keywords, and domain extraction. Responses match each note's language.
 - **Incremental analysis**: Only changed or new notes are re-processed; tab-specific results are cached separately
 - **Single consolidated AI call**: Tabs 2–4 are generated from one master analysis call, reducing token usage by ~75%
 

@@ -416,6 +416,11 @@
 
 /* 3. Graph Elements & Labels
 /*----------------------------------------*/
+/* Nodes are fill-only; no stroke/outline in any state */
+.graph-view-svg .nodes-group circle {
+  stroke: none !important;
+}
+
 .graph-labels-container {
   position: absolute;
   top: 0;

@@ -15,11 +15,13 @@
     --graph-node-color-highlighted: var(--interactive-accent-hover);
     --graph-node-opacity-default: 1;
     --graph-node-opacity-dimmed: 0.3;
+    --graph-node-stroke-width: 0;
     
-    /* Link states */
-    --graph-link-color-default: var(--background-modifier-border);
+    /* Link states - use text-muted for visibility without being primary */
+    --graph-link-color-default: var(--graph-line);
     --graph-link-color-highlighted: var(--interactive-accent);
-    --graph-link-opacity-default: 1;
+    --graph-link-opacity-default: 0.9;
+    --graph-link-opacity-highlighted: 1;
     --graph-link-opacity-dimmed: 0.3;
     --graph-link-width-default: 0.6px;
     --graph-link-width-highlighted: 0.72px;
@@ -28,7 +30,7 @@
     --graph-label-color: var(--text-muted);
     --graph-label-color-highlighted: var(--text-accent);
     --graph-label-font-size: 6px;
-    --graph-label-opacity: 0.9;
+    --graph-label-opacity-default: 0.9;
     --graph-label-opacity-highlighted: 1;
     --graph-label-opacity-dimmed: 0.3;
     --graph-label-margin: 3px;

@@ -75,6 +75,7 @@ export class GraphView {
             DEFAULT: 'var(--graph-node-color-default)',
             HIGHLIGHTED: 'var(--graph-node-color-highlighted)'
         },
+        HIGHLIGHT_SCALE: 1.05,
         SIZE_CATEGORIES: 10 // Using 10 categories for optimal visual distinction while maintaining meaningful degree variations
     } as const;
 
@@ -138,6 +139,9 @@ export class GraphView {
         return this.container.ownerDocument.defaultView!;
     }
 
+    /** Default number of steps for centrality gradient palettes (used when type is unspecified) */
+    private static readonly DEFAULT_GRADIENT_STEPS = 12;
+
     // Track gradient settings for each centrality type
     private gradientSettings: Record<typeof this.centralityTypes[number], {
         type: 'sequential' | 'diverging' | 'cyclical' | 'qualitative';
@@ -145,9 +149,9 @@ export class GraphView {
         steps: number;
         distribution: 'linear' | 'quantize' | 'jenks';
     }> = {
-        betweenness: { type: 'sequential', reversed: false, steps: 6, distribution: 'jenks' },
-        closeness: { type: 'sequential', reversed: false, steps: 6, distribution: 'jenks' },
-        eigenvector: { type: 'sequential', reversed: false, steps: 6, distribution: 'jenks' }
+        betweenness: { type: 'sequential', reversed: false, steps: GraphView.DEFAULT_GRADIENT_STEPS, distribution: 'jenks' },
+        closeness: { type: 'sequential', reversed: false, steps: GraphView.DEFAULT_GRADIENT_STEPS, distribution: 'jenks' },
+        eigenvector: { type: 'sequential', reversed: false, steps: GraphView.DEFAULT_GRADIENT_STEPS, distribution: 'jenks' }
     };
 
     // Add color palette state
@@ -914,26 +918,22 @@ export class GraphView {
         
         // Check if any centrality analysis is active
         const isCentralityActive = Object.values(this.centralityState).some(state => state);
-        
+        const scaleFactor = this.NODE.HIGHLIGHT_SCALE;
+        const getRadius = (n: SimulationGraphNode) => this.getNodeRadius(n);
+
         // Dim all nodes and links not connected - use single transition per node to reduce overhead
         this.nodesSelection.each(function(d) {
             const isSelected = d.id === nodeId;
             const isConnected = isSelected || connectedNodeIds.has(parseInt(d.id));
             const selection = d3.select(this);
+            const baseRadius = getRadius(d);
+            const radius = isSelected ? baseRadius * scaleFactor : baseRadius;
 
+            const trans = selection.transition().duration(animationDuration);
+            trans.attr('r', radius);
+            trans.style('opacity', isConnected ? 'var(--graph-node-opacity-default)' : 'var(--graph-node-opacity-dimmed)');
             if (!isCentralityActive) {
-                selection.transition()
-                    .duration(animationDuration)
-                    .style('opacity', isConnected ? 'var(--graph-node-opacity-default)' : 'var(--graph-node-opacity-dimmed)')
-                    .style('fill', isSelected ? 'var(--graph-node-color-highlighted)' : 'var(--graph-node-color-default)');
-            } else {
-                const trans = selection.transition()
-                    .duration(animationDuration)
-                    .style('opacity', isConnected ? 'var(--graph-node-opacity-default)' : 'var(--graph-node-opacity-dimmed)');
-                if (isSelected) {
-                    trans.style('stroke', 'var(--graph-node-color-highlighted)')
-                        .style('stroke-width', '2px');
-                }
+                trans.style('fill', isSelected ? 'var(--graph-node-color-highlighted)' : 'var(--graph-node-color-default)');
             }
         });
         
@@ -969,21 +969,11 @@ export class GraphView {
         const isCentralityActive = Object.values(this.centralityState).some(state => state);
         
         // Reset all nodes - use single transition when possible
+        const resetTrans = this.nodesSelection.transition().duration(animationDuration);
+        resetTrans.style('opacity', 'var(--graph-node-opacity-default)');
+        resetTrans.attr('r', d => this.getNodeRadius(d));
         if (!isCentralityActive) {
-            this.nodesSelection
-                .transition()
-                .duration(animationDuration)
-                .style('opacity', 'var(--graph-node-opacity-default)')
-                .style('stroke', 'var(--graph-node-color-default)')
-                .style('stroke-width', 'var(--graph-node-stroke-width)')
-                .style('fill', 'var(--graph-node-color-default)');
-        } else {
-            this.nodesSelection
-                .transition()
-                .duration(animationDuration)
-                .style('opacity', 'var(--graph-node-opacity-default)')
-                .style('stroke', 'var(--graph-node-color-default)')
-                .style('stroke-width', 'var(--graph-node-stroke-width)');
+            resetTrans.style('fill', 'var(--graph-node-color-default)');
         }
             
         // Reset links to default style
@@ -1071,34 +1061,17 @@ export class GraphView {
      * Apply or remove visual highlighting from a node element
      */
     private highlightNode(element: SVGCircleElement, highlight: boolean) {
+        // Scale and fill are applied in highlightConnections (which runs right after) to avoid
+        // transition conflicts. This method remains for any direct calls (e.g. drag restore).
         const node = d3.select(element);
-        // const nodeData = node.datum() as SimulationGraphNode;
-        
-        // Get the current node fill color, which could be a gradient if centrality analysis is active
-        // const currentFill = node.style('fill');
-        
-        // Check if any centrality analysis is active
+        const datum = node.datum() as SimulationGraphNode;
+        const baseRadius = this.getNodeRadius(datum);
         const isCentralityActive = Object.values(this.centralityState).some(state => state);
-        
-        // If highlighting and a centrality is active, we need to preserve the gradient color
-        if (highlight && isCentralityActive) {
-            // For highlighted nodes, we still want to show some visual feedback
-            // We can slightly increase opacity or add a stroke instead of changing the fill color
-            node.transition()
-                .duration(this.ANIMATION.DURATION)
-                .style('stroke', 'var(--graph-node-color-highlighted)')
-                .style('stroke-width', '2px');
-        } else if (!highlight && isCentralityActive) {
-            // When un-highlighting with centrality active, just remove the stroke
-            node.transition()
-                .duration(this.ANIMATION.DURATION)
-                .style('stroke', 'var(--graph-node-color-default)')
-                .style('stroke-width', 'var(--graph-node-stroke-width)');
-        } else {
-            // Default behavior when no centrality is active
-            node.transition()
-                .duration(this.ANIMATION.DURATION)
-                .style('fill', highlight ? 'var(--graph-node-color-highlighted)' : 'var(--graph-node-color-default)');
+
+        const trans = node.transition().duration(this.ANIMATION.DURATION);
+        trans.attr('r', highlight ? baseRadius * this.NODE.HIGHLIGHT_SCALE : baseRadius);
+        if (!isCentralityActive) {
+            trans.style('fill', highlight ? 'var(--graph-node-color-highlighted)' : 'var(--graph-node-color-default)');
         }
     }
     
@@ -1221,8 +1194,6 @@ export class GraphView {
                     const nodeEnter = enter.append('circle')
                         .attr('r', d => this.getNodeRadius(d))
                         .style('fill', 'var(--graph-node-color-default)')
-                        .style('stroke', 'var(--graph-node-color-default)')
-                        .style('stroke-width', 'var(--graph-node-stroke-width)')
                         .style('opacity', 'var(--graph-node-opacity-default)')
                         .call(this.setupDragBehavior());
                     
@@ -2002,7 +1973,7 @@ export class GraphView {
         element.empty();
         const palette = this.colorPalettes.find(p => p.name === paletteName);
         if (palette) {
-            const settings = type ? this.gradientSettings[type] : { steps: 6, reversed: false };
+            const settings = type ? this.gradientSettings[type] : { steps: GraphView.DEFAULT_GRADIENT_STEPS, reversed: false };
             const colorRange = colorPaletteToColorRange(palette, {
                 steps: settings.steps,
                 reversed: settings.reversed

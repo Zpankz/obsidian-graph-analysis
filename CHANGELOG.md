@@ -1,0 +1,36 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- **Gemini 3.1 Flash Lite** — Semantic analysis now uses `gemini-3.1-flash-lite-preview` with 250K requests/day on the free tier, replacing the previous dual-model setup
+- **Language matching** — Strengthened prompt instructs the AI to match each note's language in batch analysis; responses for Chinese notes are in Chinese, English in English, etc.
+
+### Changed
+
+- **Single model for semantic analysis** — Removed dual-model logic (gemini-2.5-flash-lite + gemini-2.5-flash) that alternated between models for quota limits. All semantic analysis now uses a single model
+- **Bridge/Foundation/Authority section** — Fixed `this.container` not being set when `renderNetworkAnalysis` is called directly from VaultAnalysisModals (fix branch)
+- **Network card UI** — Added 20px padding between outer card and main content in Bridge/Foundation/Authority domain cards
+- **GraphView** — Use `this.win` for `clearTimeout`, `getComputedStyle`, and `performance` (Obsidian pop-out compatibility, ESLint no-undef fix)
+- **README** — Updated Technical Details to reflect Gemini 3.1 Flash Lite with 250K RPD
+
+### Fixed
+
+- Bridge/Foundation/Authority section not showing on fix branch due to `this.container.ownerDocument` being undefined when `renderNetworkAnalysis` was called without `renderStructureAnalysis`
+
+### Removed
+
+- `getSemanticModelForBatch` and alternate-model retry logic from VaultSemanticAnalysisManager
+- `semanticModelCounter` and alternate-model retry from AISummaryManager
+
+---
+
+## [0.5.8]
+
+*(Previous release — see git history for details)*
